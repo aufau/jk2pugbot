@@ -24,9 +24,9 @@
 const char	*botVersion	= "beta";
 const char	*botHost	= "irc.quakenet.org";
 const char	*botPort	= "6667";
-const char	*botNick	= "TESTBOT";
-const char	*botChannel	= "#test1234";
-const char	*botTopic	= "Welcome to #test1234";
+const char	*botNick	= "JK2PUGBOT";
+const char	*botChannel	= "#jk2pugbot";
+const char	*botTopic	= "Welcome to #jk2pugbot";
 const char	*botQpassword	= NULL;		// Password to auth with Q or NULL
 int 		botDelay	= 50000;	// Between messages. In microseconds
 
@@ -370,8 +370,11 @@ void promotePickup(pickupNode_t *node)
 {
 	if (node) {
 		if (node->pickup->max) {
-			raw("PRIVMSG %s :\x02Only %d players needed for %s game! Type !add %s to sign up.\x02\r\n",
-			    botChannel, node->pickup->max - node->pickup->count, node->pickup->name, node->pickup->name);
+			const char *plural = node->pickup->count == 1 ? "" : "s";
+
+			raw("PRIVMSG %s :\x02Only %d player%s needed for %s game!\x02 Type !add %s to sign up.\r\n",
+			    botChannel, node->pickup->max - node->pickup->count,
+			    plural, node->pickup->name, node->pickup->name);
 		} else if (node->pickup->count) {
 			pickupNode_t *pickupNode;
 
@@ -395,7 +398,7 @@ void promotePickup(pickupNode_t *node)
 
 void printHelp(const char *to)
 {
-	raw("PRIVMSG %s :JK2BOT %s by fau <faltec@gmail.com>\r\n", to, botVersion);
+	raw("PRIVMSG %s :jk2pugbot %s by fau <faltec@gmail.com>\r\n", to, botVersion);
 	raw("PRIVMSG %s :You can type commands in the main channel or query the bot. Most commands accept pickup names as parameters.\r\n", to);
 	raw("PRIVMSG %s :!help - Print this message\r\n", to);
 	raw("PRIVMSG %s :!add - Add up to a pickup game.\r\n", to);
@@ -540,19 +543,19 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 	args = strtok(NULL , " ");
    	pickupList = parsePickupList(NULL, args);
 
-	if (!strncmp(cmd, "add", 3)) {
+	if (!strcmp(cmd, "add")) {
 		if (pickupList)
 			addNick(pickupList, from);
 		else
 			printGames();
-	} else if (!strncmp(cmd, "remove", 6)) {
+	} else if (!strcmp(cmd, "remove")) {
 		if (!args)
 			purgeNick(from);
 		else if(pickupList)
 			removeNick(pickupList, from);
 		else
 			printGames();
-	} else if (!strncmp(cmd, "who", 3)) {
+	} else if (!strcmp(cmd, "who")) {
 		if (!args)
 			announcePlayers(allPickups, replyTo);
 		else if(pickupList)
@@ -566,7 +569,7 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 			printGames();
 	} else if (!strcmp(cmd, "help")) {
 		printHelp(replyTo);
-	} else if (!strncmp(cmd, "ping", 4)) {
+	} else if (!strcmp(cmd, "ping")) {
 		raw("PRIVMSG %s :!pong\r\n", replyTo);
 	}
 

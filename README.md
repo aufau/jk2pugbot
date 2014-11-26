@@ -12,8 +12,9 @@ Features
 --------
 
 * Support multiple pickup lists.
+* !add !remove !who !promote commands accept multiple arguments
 * Track nick changes and autoremove on PART and QUIT.
-* Auth with Q
+* Auth with Q.
 
 Configuration
 -------------
