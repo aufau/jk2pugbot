@@ -29,6 +29,7 @@ const char	*botChannel	= "#jk2pugbot";
 const char	*botTopic	= "Welcome to #jk2pugbot";
 const char	*botQpassword	= NULL;		// Password to auth with Q or NULL
 int 		botDelay	= 50000;	// Between messages. In microseconds
+int		botTimeout	= 600;		// Try to reconnect after this number of seconds
 
 pickup_t pickupsArray[] = {
 	{ .name = "MB", .max = 6 },
@@ -612,22 +613,6 @@ void sigHandler(int signum)
 	close(conn);
 }
 
-/* Debugging
- * helpers
- */
-
-#ifdef DEBUG
-void printPlayerList(playerNode_t *node)
-{
-	if (!node) {
-		printf("\n");
-	} else {
-		printf("%s ", node->player->nick);
-		printPlayerList(node->next);
-	}
-}
-#endif
-
 int main()
 {
 	message_t message;
@@ -635,7 +620,10 @@ int main()
 	struct addrinfo hints;
 	struct addrinfo *res;
 
-	int	sl;
+	fd_set	set;
+	struct timeval timeout;
+	int	selVal;
+	int	bufLen;
 
 	struct sigaction act = {
 		.sa_handler	= sigHandler,
@@ -647,31 +635,45 @@ int main()
 
 	sigaction(SIGINT, &act, NULL);
 
-	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_STREAM;
-	getaddrinfo(botHost, botPort, &hints, &res);
-	conn = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-	connect(conn, res->ai_addr, res->ai_addrlen);
-
-	raw("USER %s 0 0 :%s\r\n", botNick, botNick);
-	raw("NICK %s\r\n", botNick);
-
 	for (int i = 0; i < sizeof(pickupsArray) / sizeof(*pickupsArray); i++)
 		allPickups = pushPickup(allPickups, &pickupsArray[i]);
 
-	while ((sl = read(conn, buf, 512)) > 0) {
-		buf[sl + 1] = '\0';
-		parseBuf(buf, &message);
-		do {
-			messageReply(&message);
-#ifdef DEBUG
-			printPlayerList(nickList);
-#endif
-		} while (parseBuf(NULL, &message));
-		if (statusChanged)
-			updateStatus();
+	while (true) {
+		memset(&hints, 0, sizeof(struct addrinfo));
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_STREAM;
+		getaddrinfo(botHost, botPort, &hints, &res);
+		conn = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+		connect(conn, res->ai_addr, res->ai_addrlen);
+
+		raw("USER %s 0 0 :%s\r\n", botNick, botNick);
+		raw("NICK %s\r\n", botNick);
+
+		while (true) {
+			FD_ZERO(&set);
+			FD_SET(conn, &set);
+			timeout.tv_sec = botTimeout;
+			selVal = select(conn + 1, &set, NULL, NULL, &timeout);
+			if (selVal == -1) {
+				perror(NULL);
+				return 2;
+			} else if (selVal == 0) {
+				printf("\nPing timeout. Reconnecting...\n\n");
+				break;
+			}
+
+			bufLen = read(conn, buf, 512);
+			if (bufLen <= 0) {
+				perror(NULL);
+				return 3;
+			}
+			buf[bufLen + 1] = '\0';
+			parseBuf(buf, &message);
+			do {
+				messageReply(&message);
+			} while (parseBuf(NULL, &message));
+			if (statusChanged)
+				updateStatus();
+		}
 	}
-	perror(NULL);
-	return 2;
 }
