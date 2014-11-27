@@ -44,6 +44,8 @@ pickup_t pickupsArray[] = {
  */
 
 int	conn;
+time_t	epochTime;
+struct tm *locTime;
 char	buf[BUFFER_SIZE];
 char	sbuf[BUFFER_SIZE];
 
@@ -54,11 +56,11 @@ bool	statusChanged = false;
 
 void sbufRaw(void)
 {
-	printf("<< %s", sbuf);
-	if (write(conn, sbuf, strlen(sbuf)) == -1) {
+	time(&epochTime);
+	locTime = localtime(&epochTime);
+	printf("%02d:%02d << %s", locTime->tm_hour, locTime->tm_min, sbuf);
+	if (write(conn, sbuf, strlen(sbuf)) == -1)
 		perror("sbufRaw write: ");
-		exit(1);
-	}
 	usleep(botDelay);
 }
 
@@ -473,7 +475,9 @@ bool parseBuf(char *buf, message_t *message)
 		return false;
 	}
 
-	printf(">> %s\n", ptr);
+	time(&epochTime);
+	locTime = localtime(&epochTime);
+	printf("%02d:%02d >> %s\n", locTime->tm_hour, locTime->tm_min, ptr);
 
 	// Find <trailing> sequence
 	trailingptr = strstr(ptr, " :");
@@ -508,31 +512,6 @@ bool parseBuf(char *buf, message_t *message)
 	} while (i < 14 && message->parameter[i] != NULL);
 
 	return true;
-}
-
-void printMessage(message_t *msg)
-{
-	if (msg->prefix.nick) {
-		printf("prefix.nick = %s\n", msg->prefix.nick);
-	} else if (msg->prefix.servername) {
-		printf("prefix.servername = %s\n", msg->prefix.servername);
-	}
-	if (msg->prefix.user)
-		printf("prefix.user = %s\n", msg->prefix.user);
-	if (msg->prefix.host)
-		printf("prefix.host = %s\n", msg->prefix.host);
-
-	if (msg->command)
-		printf("command    = %s\n", msg->command);
-
-	for (int i = 0; msg->parameter[i] && i < 15; i++)
-		if (msg->parameter[i])
-			printf("parameter%d = %s\n", i, msg->parameter[i]);
-
-	if (msg->trailing)
-		printf("trailing   = %s\n", msg->trailing);
-
-	printf("\n");
 }
 
 void privmsgReply(char *cmd, const char *replyTo, const char *from)
