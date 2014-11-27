@@ -56,7 +56,7 @@ void sbufRaw(void)
 {
 	printf("<< %s", sbuf);
 	if (write(conn, sbuf, strlen(sbuf)) == -1) {
-		perror(NULL);
+		perror("sbufRaw write: ");
 		exit(1);
 	}
 	usleep(botDelay);
@@ -622,7 +622,7 @@ int main()
 
 	fd_set	set;
 	struct timeval timeout;
-	int	selVal;
+	int	retVal;
 	int	bufLen;
 
 	struct sigaction act = {
@@ -642,9 +642,27 @@ int main()
 		memset(&hints, 0, sizeof(struct addrinfo));
 		hints.ai_family = AF_INET;
 		hints.ai_socktype = SOCK_STREAM;
-		getaddrinfo(botHost, botPort, &hints, &res);
+		retVal = getaddrinfo(botHost, botPort, &hints, &res);
+		if (retVal) {
+			fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(retVal));
+			timeout.tv_sec = botTimeout;
+			select(0, NULL, NULL, NULL, &timeout);
+			continue;
+		}
 		conn = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-		connect(conn, res->ai_addr, res->ai_addrlen);
+		if (conn == -1) {
+			perror("socket: ");
+			timeout.tv_sec = botTimeout;
+			select(0, NULL, NULL, NULL, &timeout);
+			continue;
+		}
+		retVal = connect(conn, res->ai_addr, res->ai_addrlen);
+		if (retVal == -1) {
+			perror("connect: ");
+			timeout.tv_sec = botTimeout;
+			select(0, NULL, NULL, NULL, &timeout);
+			continue;
+		}
 
 		raw("USER %s 0 0 :%s\r\n", botNick, botNick);
 		raw("NICK %s\r\n", botNick);
@@ -653,19 +671,21 @@ int main()
 			FD_ZERO(&set);
 			FD_SET(conn, &set);
 			timeout.tv_sec = botTimeout;
-			selVal = select(conn + 1, &set, NULL, NULL, &timeout);
-			if (selVal == -1) {
-				perror(NULL);
-				return 2;
-			} else if (selVal == 0) {
+			retVal = select(conn + 1, &set, NULL, NULL, &timeout);
+			if (retVal == -1) {
+				perror("select: ");
+				exit(EXIT_FAILURE);
+			} else if (retVal == 0) {
 				printf("\nPing timeout. Reconnecting...\n\n");
 				break;
 			}
 
 			bufLen = read(conn, buf, 512);
 			if (bufLen <= 0) {
-				perror(NULL);
-				return 3;
+				perror("read: ");
+				timeout.tv_sec = botTimeout;
+				select(0, NULL, NULL, NULL, &timeout);
+				continue;
 			}
 			buf[bufLen + 1] = '\0';
 			parseBuf(buf, &message);
