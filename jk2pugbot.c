@@ -321,7 +321,7 @@ void updateStatus()
 {
 	int pos;
 
-	pos = snprintf(sbuf, BUFFER_SIZE, "TOPIC %s : ", botChannel);
+	pos = snprintf(sbuf, BUFFER_SIZE, "TOPIC %s :", botChannel);
 	pos = printPickups(allPickups, pos);
 	snprintf(sbuf + pos, BUFFER_SIZE - pos,
 		 "\x02(\x02 %s \x02)(\x02 Type !help for more info \x02)\x02\r\n", botTopic);
@@ -401,13 +401,18 @@ void promotePickup(pickupNode_t *node)
 
 void printHelp(const char *to)
 {
-	raw("PRIVMSG %s :jk2pugbot %s by fau <faltec@gmail.com>\r\n", to, botVersion);
-	raw("PRIVMSG %s :You can type commands in the main channel or query the bot. Most commands accept pickup names as parameters.\r\n", to);
-	raw("PRIVMSG %s :!help - Print this message\r\n", to);
+	raw("PRIVMSG %s :You can type commands in the main channel or query the bot.\r\n", to);
+	raw("PRIVMSG %s :!help, !version - print info messages\r\n", to);
 	raw("PRIVMSG %s :!add - Add up to a pickup game.\r\n", to);
 	raw("PRIVMSG %s :!remove - Remove yourself from all pickups.\r\n", to);
 	raw("PRIVMSG %s :!who - List players added to pickups\r\n", to);
 	raw("PRIVMSG %s :!promote - Promote a pickup game\r\n", to);
+}
+
+void printVersion(const char *to)
+{
+	raw("PRIVMSG %s :jk2pugbot %s by fau <faltec@gmail.com>\r\n", to, botVersion);
+	raw("PRIVMSG %s :Visit https://github.com/aufau/jk2pugbot for more\r\n", to);
 }
 
 int printGamesH(pickupNode_t *node, int pos)
@@ -549,6 +554,8 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 			printGames();
 	} else if (!strcmp(cmd, "help")) {
 		printHelp(replyTo);
+	} else if (!strcmp(cmd, "version")) {
+		printVersion(replyTo);
 	} else if (!strcmp(cmd, "ping")) {
 		raw("PRIVMSG %s :!pong\r\n", replyTo);
 	}
