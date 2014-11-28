@@ -29,7 +29,7 @@ const char	*botChannel	= "#jk2pugbot";
 const char	*botTopic	= "Welcome to #jk2pugbot";
 const char	*botQpassword	= NULL;		// Password to auth with Q or NULL
 int 		botDelay	= 50000;	// Between messages. In microseconds
-int		botTimeout	= 600;		// Try to reconnect after this number of seconds
+int		botTimeout	= 300;		// Try to reconnect after this number of seconds
 
 pickup_t pickupsArray[] = {
 	{ .name = "MB", .max = 6 },
@@ -618,35 +618,33 @@ int main()
 	memset(&act, 0, sizeof(act));
 	act.sa_handler = sigHandler;
 	sigemptyset(&act.sa_mask);
-
 	sigaction(SIGINT, &act, NULL);
 
 	for (int i = 0; i < sizeof(pickupsArray) / sizeof(*pickupsArray); i++)
 		allPickups = pushPickup(allPickups, &pickupsArray[i]);
 
 	while (true) {
+		purgePlayers(nickList);
+
 		memset(&hints, 0, sizeof(struct addrinfo));
 		hints.ai_family = AF_INET;
 		hints.ai_socktype = SOCK_STREAM;
 		retVal = getaddrinfo(botHost, botPort, &hints, &res);
 		if (retVal) {
 			fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(retVal));
-			timeout.tv_sec = botTimeout;
-			select(0, NULL, NULL, NULL, &timeout);
+			sleep(botTimeout);
 			continue;
 		}
 		conn = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if (conn == -1) {
 			perror("socket: ");
-			timeout.tv_sec = botTimeout;
-			select(0, NULL, NULL, NULL, &timeout);
+			sleep(botTimeout);
 			continue;
 		}
 		retVal = connect(conn, res->ai_addr, res->ai_addrlen);
 		if (retVal == -1) {
 			perror("connect: ");
-			timeout.tv_sec = botTimeout;
-			select(0, NULL, NULL, NULL, &timeout);
+			sleep(botTimeout);
 			continue;
 		}
 
@@ -660,7 +658,8 @@ int main()
 			retVal = select(conn + 1, &set, NULL, NULL, &timeout);
 			if (retVal == -1) {
 				perror("select: ");
-				exit(EXIT_FAILURE);
+				sleep(botTimeout);
+				continue;
 			} else if (retVal == 0) {
 				printf("\nPing timeout. Reconnecting...\n\n");
 				break;
@@ -669,8 +668,7 @@ int main()
 			bufLen = read(conn, buf, 512);
 			if (bufLen <= 0) {
 				perror("read: ");
-				timeout.tv_sec = botTimeout;
-				select(0, NULL, NULL, NULL, &timeout);
+				sleep(botTimeout);
 				continue;
 			}
 			buf[bufLen + 1] = '\0';
