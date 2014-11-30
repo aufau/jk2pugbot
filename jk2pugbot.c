@@ -31,6 +31,7 @@ const char	*botQpassword	= NULL;		// Password to auth with Q or NULL
 int 		botDelay	= 50000;	// Between messages. In microseconds
 int		botTimeout	= 300;		// Try to reconnect after this number of seconds
 
+
 pickup_t pickupsArray[] = {
 	{ .name = "MB", .max = 6 },
 	{ .name = "CTF", .max = 6 },
@@ -39,15 +40,26 @@ pickup_t pickupsArray[] = {
 	{ .name = "duel", .max = 0 },
 };
 
+// These servers will be recommended when announcing a pickup game.
+// If your game doesn't use quake 3 engine then don't set the .type variable.
+server_t serversArray[] = {
+	{ .name = "FC", .address = "force-crusaders.org", .port = "28071", .games = "2v2 4v4", .type = SV_Q3 },
+	{ .name = "zedi", .address = "185.44.107.108", .port = "28051", .games = "2v2 4v4", .type = SV_Q3 },
+	{ .name = "LOL", .address = "178.162.194.152", .port = "28071", .games = "2v2 4v4", .type = SV_Q3 },
+	{ .name = "[united] Coruscant", .address = "185.44.107.108", .port = "28070", .games = "CTF", .type = SV_Q3 },
+	{ .name = "jk2.ouned.de", .address = "185.44.107.108", .port = "28071", .games = "CTF", .type = SV_Q3 },
+};
+
 /*
  * Code
  */
 
-int	conn;
-time_t	epochTime;
-struct tm *locTime;
-char	buf[BUFFER_SIZE];
-char	sbuf[BUFFER_SIZE];
+int		conn;
+time_t		epochTime;
+struct tm	*locTime;
+char		buf[BUFFER_SIZE];
+char		sbuf[BUFFER_SIZE];
+char		svbuf[SVINFO_BUFFER_SIZE];
 
 pickupNode_t	*allPickups;
 playerNode_t	*nickList;
@@ -79,6 +91,70 @@ void *smalloc(size_t size)
 	assert(retval);
 	return retval;
 }
+
+void sigHandler(int signum)
+{
+	raw("QUIT :SIGINT\r\n");
+	close(conn);
+	exit(EXIT_SUCCESS);
+}
+
+int getQ3ServerInfo(server_t *server, q3serverInfo_t *info)
+{
+	struct addrinfo hints;
+	struct addrinfo *res;
+	struct timeval timeout;
+	const char *getinfo = "\xFF\xFF\xFF\xFF\x02getinfo\x0a\x00";
+	char	*ptr;
+	fd_set	set;
+	int	readlen;
+	int	sv_sock;
+
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_DGRAM;
+	if (getaddrinfo(server->address, server->port, &hints, &res))
+		return 0;
+	sv_sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+	if (sv_sock == -1)
+		return -1;
+
+	sendto(sv_sock, getinfo, strlen(getinfo) + 1, 0, res->ai_addr, res->ai_addrlen);
+	freeaddrinfo(res);
+
+	FD_ZERO(&set);
+	FD_SET(sv_sock, &set);
+	timeout.tv_sec = 1;
+	timeout.tv_usec = 0;
+	if (select(sv_sock + 1, &set, NULL, NULL, &timeout) != 1) {
+		close(sv_sock);
+		return 0;
+	}
+
+	readlen = read(sv_sock, svbuf, SVINFO_BUFFER_SIZE - 1);
+	close(sv_sock);
+	if (readlen == -1)
+		return -1;
+
+	svbuf[readlen] = '\0';
+	ptr = strtok(svbuf, "\\");
+	info->maxclients = 0;
+	info->clients = 0;
+	do {
+		if (!strcmp(ptr, "sv_maxclients"))
+			info->maxclients = atoi(strtok(NULL, "\\"));
+		else if (!strcmp(ptr, "clients"))
+			info->clients = atoi(strtok(NULL, "\\"));
+
+		ptr = strtok(NULL, "\\");
+	} while (ptr);
+
+	if (info->maxclients)
+		return 1;
+	else
+		return 0;
+}
+
 
 /* List manipulation
  * functions
@@ -138,6 +214,22 @@ playerNode_t *pushPlayer(playerNode_t *node, player_t *player)
 	playerNode->player = player;
 	playerNode->next = node;
 	return playerNode;
+}
+
+serverNode_t *pushServer(serverNode_t *node, server_t *server)
+{
+	serverNode_t *serverNode = smalloc(sizeof(serverNode_t));
+	serverNode->server = server;
+	serverNode->next = node;
+	return serverNode;
+}
+
+void addServer(pickupNode_t *node, server_t *server)
+{
+	if (node) {
+		node->pickup->serverList = pushServer(node->pickup->serverList, server);
+		addServer(node->next, server);
+	}
 }
 
 /* cutPlayer
@@ -228,8 +320,9 @@ void purgePlayer(player_t *player)
 void purgePlayers(playerNode_t *node)
 {
 	if (node) {
+		playerNode_t *playerNode = node->next;
 		purgePlayer(node->player);
-		purgePlayers(popPlayer(node));
+		purgePlayers(playerNode);
 	}
 }
 
@@ -253,6 +346,7 @@ void addPlayer(pickupNode_t *node, player_t *player)
 			if (node->pickup->max && node->pickup->count == node->pickup->max) {
 				announcePickup(node->pickup);
 				purgePlayers(node->pickup->playerList);
+				return;
 			}
 		}
 		addPlayer(node->next, player);
@@ -317,6 +411,35 @@ int printPickups(pickupNode_t *node, int pos)
 	}
 }
 
+int printServers(serverNode_t *node, int pos)
+{
+	q3serverInfo_t q3serverInfo;
+
+	if (!node) {
+		return pos;
+	} else {
+		int retVal = 0;
+
+		if (node->server->type == SV_Q3)
+			retVal = getQ3ServerInfo(node->server, &q3serverInfo);
+
+		if (retVal == 1) {
+			pos += snprintf(sbuf + pos, BUFFER_SIZE - pos,
+					"\x02(\x02 %s %d/%d %s:%s \x02)\x02",
+					node->server->name, q3serverInfo.clients,
+					q3serverInfo.maxclients, node->server->address,
+					node->server->port);
+		} else if (retVal == -1) {
+			pos += snprintf(sbuf + pos, BUFFER_SIZE - pos,
+					"\x02(\x02 %s %s:%s \x02)\x02",
+					node->server->name, node->server->address,
+					node->server->port);
+		}
+		return printServers(node->next, pos);
+	}
+}
+
+
 void updateStatus()
 {
 	int pos;
@@ -341,6 +464,13 @@ void announcePickup(pickup_t *pickup)
 	pos = printPlayers(pickup->playerList, pos, ", ");
 	snprintf(sbuf + pos, BUFFER_SIZE - pos, "\r\n");
 	sbufRaw();
+
+	if (pickup->serverList) {
+		pos = snprintf(sbuf, BUFFER_SIZE, "PRIVMSG %s :Recommended servers: ", botChannel);
+		pos = printServers(pickup->serverList, pos);
+		snprintf(sbuf + pos, BUFFER_SIZE - pos, "\r\n");
+		sbufRaw();
+	}
 }
 
 void announcePlayers(pickupNode_t *node, const char *to)
@@ -449,19 +579,17 @@ pickup_t *parsePickupListH(pickupNode_t *node, const char *list)
 		return parsePickupListH(node->next, list);
 }
 
-pickupNode_t *parsePickupList(pickupNode_t *node, const char *list)
+pickupNode_t *parsePickupList(const char *list)
 {
-	if (list) {
-		pickup_t *pickup = parsePickupListH(allPickups, list);
-		if (pickup)
-			node = pushPickup(node, pickup);
-		else
-			return NULL;
-
-		list = strtok(NULL, " ");
-		return parsePickupList(node, list);
+	if (!list) {
+		return NULL;
 	} else {
-		return node;
+		pickup_t *pickup = parsePickupListH(allPickups, list);
+		list = strtok(NULL, " ");
+		if (pickup)
+			return pushPickup(parsePickupList(list), pickup);
+		else
+			return parsePickupList(list);
 	}
 }
 
@@ -525,8 +653,8 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 	char *args;
 
 	strtok(cmd, " ");
-	args = strtok(NULL , " ");
-   	pickupList = parsePickupList(NULL, args);
+	args = strtok(NULL, " ");
+	pickupList = parsePickupList(args);
 
 	if (!strcmp(cmd, "add")) {
 		if (pickupList)
@@ -593,11 +721,35 @@ void messageReply(message_t *message)
 	}
 }
 
-void sigHandler(int signum)
+void initPickups()
 {
-	raw("QUIT :SIGINT\r\n");
-	close(conn);
+	pickupNode_t *pickupList;
+	char *games;
+	int i;
+
+	for (i = 0; i < sizeof(pickupsArray) / sizeof(*pickupsArray); i++)
+		allPickups = pushPickup(allPickups, &pickupsArray[i]);
+
+	for (i = 0; i < sizeof(serversArray) / sizeof(*serversArray); i++) {
+		games = strdup(serversArray[i].games);
+		assert(games);
+		pickupList = parsePickupList(strtok(games, " "));
+		addServer(pickupList, &serversArray[i]);
+		free(games);
+	}
 }
+
+#ifdef DEBUG
+void printLists()
+{
+	if(nickList) {
+		printf("nickList = ");
+		printPlayers(nickList, 0, "->");
+		printf(sbuf);
+		printf("\n");
+	}
+}
+#endif
 
 int main()
 {
@@ -620,8 +772,7 @@ int main()
 	sigemptyset(&act.sa_mask);
 	sigaction(SIGINT, &act, NULL);
 
-	for (int i = 0; i < sizeof(pickupsArray) / sizeof(*pickupsArray); i++)
-		allPickups = pushPickup(allPickups, &pickupsArray[i]);
+	initPickups();
 
 	while (true) {
 		purgePlayers(nickList);
@@ -647,6 +798,7 @@ int main()
 			sleep(botTimeout);
 			continue;
 		}
+		freeaddrinfo(res);
 
 		raw("USER %s 0 0 :%s\r\n", botNick, botNick);
 		raw("NICK %s\r\n", botNick);
@@ -655,6 +807,7 @@ int main()
 			FD_ZERO(&set);
 			FD_SET(conn, &set);
 			timeout.tv_sec = botTimeout;
+			timeout.tv_usec = 0;
 			retVal = select(conn + 1, &set, NULL, NULL, &timeout);
 			if (retVal == -1) {
 				perror("select: ");
@@ -675,6 +828,9 @@ int main()
 			parseBuf(buf, &message);
 			do {
 				messageReply(&message);
+#ifdef DEBUG
+				printLists();
+#endif
 			} while (parseBuf(NULL, &message));
 			if (statusChanged)
 				updateStatus();

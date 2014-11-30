@@ -34,6 +34,17 @@
 
 
 #define BUFFER_SIZE 513
+#define SVINFO_BUFFER_SIZE 1025
+
+enum sv_type {
+	SV_NONE = 0,
+	SV_Q3
+};
+
+typedef struct q3serverInfo_s {
+	int maxclients;
+	int clients;
+} q3serverInfo_t;
 
 struct prefix_s {
 	union {
@@ -60,11 +71,26 @@ typedef struct playerNode_s {
 	struct playerNode_s *next;
 } playerNode_t;
 
+typedef struct server_s {
+	const char *name;
+	const char *address;
+	const char *port;
+	char *games;
+	enum sv_type type;
+} server_t;
+
+typedef struct serverNode_s {
+	server_t *server;
+	struct serverNode_s *next;
+} serverNode_t;
+
 typedef struct pickup_s {
 	const char *name;
+	serverNode_t *serverList;
+	playerNode_t *playerList;
+	int serverCount;
 	int count;
 	int max;
-	struct playerNode_s *playerList;
 } pickup_t;
 
 typedef struct pickupNode_s {
