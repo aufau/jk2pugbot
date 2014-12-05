@@ -30,7 +30,7 @@ const char	*botTopic	= "Welcome to #jk2pugbot";
 const char	*botQpassword	= NULL;		// Password to auth with Q or NULL
 int 		botDelay	= 50000;	// Between messages. In microseconds
 int		botTimeout	= 300;		// Try to reconnect after this number of seconds
-
+bool		botSilentWho	= true;		// Don't announce players in the main channel
 
 pickup_t pickupsArray[] = {
 	{ .name = "MB", .max = 6 },
@@ -43,9 +43,8 @@ pickup_t pickupsArray[] = {
 // These servers will be recommended when announcing a pickup game.
 // If your game doesn't use quake 3 engine then don't set the .type variable.
 server_t serversArray[] = {
-	{ .name = "FC", .address = "force-crusaders.org", .port = "28071", .games = "2v2 4v4", .type = SV_Q3 },
 	{ .name = "zedi", .address = "185.44.107.108", .port = "28051", .games = "2v2 4v4", .type = SV_Q3 },
-	{ .name = "LOL", .address = "178.162.194.152", .port = "28071", .games = "2v2 4v4", .type = SV_Q3 },
+	{ .name = "FC League", .address = "force-crusaders.org", .port = "28071", .games = "2v2 4v4", .type = SV_Q3 },
 	{ .name = "[united] Coruscant", .address = "185.44.107.108", .port = "28070", .games = "CTF", .type = SV_Q3 },
 	{ .name = "jk2.ouned.de", .address = "185.44.107.108", .port = "28071", .games = "CTF", .type = SV_Q3 },
 };
@@ -501,25 +500,33 @@ void announcePlayers(pickupNode_t *node, const char *to)
 
 void promotePickup(pickupNode_t *node)
 {
-	if (node) {
-		if (node->pickup->max) {
-			const char *plural = node->pickup->count == 1 ? "" : "s";
+	const char *pluralSuffix;
+	const char *beForm;
+	pickupNode_t *pickupNode;
 
+	if (node) {
+		if (node->pickup->count == 1) {
+			pluralSuffix = "";
+			beForm = "is";
+		} else {
+			pluralSuffix = "s";
+			beForm = "are";
+		}
+
+		if (node->pickup->max && node->pickup->count) {
 			raw("PRIVMSG %s :\x02Only %d player%s needed for %s game!\x02 Type !add %s to sign up.\r\n",
 			    botChannel, node->pickup->max - node->pickup->count,
-			    plural, node->pickup->name, node->pickup->name);
+			    pluralSuffix, node->pickup->name, node->pickup->name);
+		} else if (node->pickup->count == 1 && !botSilentWho) {
+			raw("PRIVMSG %s :\x02Wanna play %s? %s is waiting!\x02 Type !add %s\r\n",
+			    botChannel, node->pickup->name,
+			    node->pickup->playerList->player->nick, node->pickup->name);
 		} else if (node->pickup->count) {
-			pickupNode_t *pickupNode;
+			raw("PRIVMSG %s :\x02Wanna play %s? There %s %d player%s waiting!\x02 Type !add %s\r\n",
+			    botChannel, node->pickup->name, beForm, node->pickup->count,
+			    pluralSuffix, node->pickup->name);
 
-			if (node->pickup->count == 1) {
-				raw("PRIVMSG %s :\x02Wanna play %s? %s is waiting!\x02 Type !add %s\r\n",
-				    botChannel, node->pickup->name,
-				    node->pickup->playerList->player->nick, node->pickup->name);
-			} else {
-				raw("PRIVMSG %s :\x02Wanna play %s? There are %d players waiting!\x02 Type !add %s\r\n",
-				    botChannel, node->pickup->name,
-				    node->pickup->count, node->pickup->name);
-
+			if (!botSilentWho) {
 				pickupNode = pushPickup(NULL, node->pickup);
 				announcePlayers(pickupNode, botChannel);
 				popPickup(pickupNode);
@@ -669,6 +676,9 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 		else
 			printGames();
 	} else if (!strcmp(cmd, "who")) {
+		if (botSilentWho)
+			replyTo = from;
+
 		if (!args)
 			announcePlayers(allPickups, replyTo);
 		else if(pickupList)
@@ -767,6 +777,7 @@ int main()
 		.sa_handler	= sigHandler,
 		.sa_flags	= 0,
 	};
+
 	memset(&act, 0, sizeof(act));
 	act.sa_handler = sigHandler;
 	sigemptyset(&act.sa_mask);
@@ -774,66 +785,65 @@ int main()
 
 	initPickups();
 
+connect:
+	purgePlayers(nickList);
+
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	retVal = getaddrinfo(botHost, botPort, &hints, &res);
+	if (retVal) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(retVal));
+		sleep(botTimeout);
+		goto connect;
+	}
+	conn = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+	if (conn == -1) {
+		perror("socket: ");
+		sleep(botTimeout);
+		goto connect;
+	}
+	retVal = connect(conn, res->ai_addr, res->ai_addrlen);
+	if (retVal == -1) {
+		perror("connect: ");
+		sleep(botTimeout);
+		goto connect;
+	}
+	freeaddrinfo(res);
+
+	raw("USER %s 0 0 :%s\r\n", botNick, botNick);
+	raw("NICK %s\r\n", botNick);
+
 	while (true) {
-		purgePlayers(nickList);
-
-		memset(&hints, 0, sizeof(struct addrinfo));
-		hints.ai_family = AF_INET;
-		hints.ai_socktype = SOCK_STREAM;
-		retVal = getaddrinfo(botHost, botPort, &hints, &res);
-		if (retVal) {
-			fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(retVal));
-			sleep(botTimeout);
-			continue;
-		}
-		conn = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-		if (conn == -1) {
-			perror("socket: ");
-			sleep(botTimeout);
-			continue;
-		}
-		retVal = connect(conn, res->ai_addr, res->ai_addrlen);
+		FD_ZERO(&set);
+		FD_SET(conn, &set);
+		timeout.tv_sec = botTimeout;
+		timeout.tv_usec = 0;
+		retVal = select(conn + 1, &set, NULL, NULL, &timeout);
 		if (retVal == -1) {
-			perror("connect: ");
+			perror("select: ");
 			sleep(botTimeout);
-			continue;
+			goto connect;
+		} else if (retVal == 0) {
+			printf("\nPing timeout. Reconnecting...\n\n");
+			goto connect;
 		}
-		freeaddrinfo(res);
 
-		raw("USER %s 0 0 :%s\r\n", botNick, botNick);
-		raw("NICK %s\r\n", botNick);
-
-		while (true) {
-			FD_ZERO(&set);
-			FD_SET(conn, &set);
-			timeout.tv_sec = botTimeout;
-			timeout.tv_usec = 0;
-			retVal = select(conn + 1, &set, NULL, NULL, &timeout);
-			if (retVal == -1) {
-				perror("select: ");
-				sleep(botTimeout);
-				continue;
-			} else if (retVal == 0) {
-				printf("\nPing timeout. Reconnecting...\n\n");
-				break;
-			}
-
-			bufLen = read(conn, buf, 512);
-			if (bufLen <= 0) {
-				perror("read: ");
-				sleep(botTimeout);
-				continue;
-			}
-			buf[bufLen + 1] = '\0';
-			parseBuf(buf, &message);
-			do {
-				messageReply(&message);
+		bufLen = read(conn, buf, 512);
+		if (bufLen <= 0) {
+			perror("read: ");
+			sleep(botTimeout);
+			goto connect;
+		}
+		buf[bufLen + 1] = '\0';
+		parseBuf(buf, &message);
+		do {
+			messageReply(&message);
 #ifdef DEBUG
-				printLists();
+			printLists();
 #endif
-			} while (parseBuf(NULL, &message));
-			if (statusChanged)
-				updateStatus();
-		}
+		} while (parseBuf(NULL, &message));
+		if (statusChanged)
+			updateStatus();
 	}
 }
