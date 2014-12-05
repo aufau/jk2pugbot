@@ -1004,6 +1004,7 @@ void numericReplyReply(int num, message_t *message)
 		if (botQpassword) {
 			bot_printf("PRIVMSG Q@CServe.quakenet.org :AUTH %s %s\r\n",
 				   botNick, botQpassword);
+			bot_printf("MODE %s +x\r\n", botNick);
 		}
 		bot_printf("JOIN %s\r\n", botChannel);
 		break;
