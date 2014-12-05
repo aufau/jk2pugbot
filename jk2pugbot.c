@@ -721,12 +721,16 @@ void messageReply(message_t *message)
 	} else if (!strcmp(message->command, "PART") ||
 		   !strcmp(message->command, "QUIT")) {
 		purgeNick(message->prefix.nick);
+	} else if (!strcmp(message->command, "KICK") &&
+		   !strcmp(message->parameter[0], botChannel)) {
+		purgeNick(message->parameter[1]);
 	} else if (!strcmp(message->command, "NICK")) {
 		changeNick(message->prefix.nick, message->trailing);
 	} else if (!strcmp(message->command, "001")) {
-		if (botQpassword)
+		if (botQpassword) {
 			raw("PRIVMSG Q@CServe.quakenet.org :AUTH %s %s\r\n",
 			    botNick, botQpassword);
+		}
 		raw("JOIN %s\r\n", botChannel);
 	}
 }
@@ -766,7 +770,7 @@ int main()
 	message_t message;
 
 	struct addrinfo hints;
-	struct addrinfo *res;
+	struct addrinfo *res = NULL;
 
 	fd_set	set;
 	struct timeval timeout;
@@ -791,6 +795,10 @@ connect:
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
+	if (res) {
+		freeaddrinfo(res);
+		res = NULL;
+	}
 	retVal = getaddrinfo(botHost, botPort, &hints, &res);
 	if (retVal) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(retVal));
@@ -809,7 +817,6 @@ connect:
 		sleep(botTimeout);
 		goto connect;
 	}
-	freeaddrinfo(res);
 
 	raw("USER %s 0 0 :%s\r\n", botNick, botNick);
 	raw("NICK %s\r\n", botNick);
