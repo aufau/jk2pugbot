@@ -140,9 +140,11 @@ int getQ3ServerInfo(server_t *server, q3serverInfo_t *info)
 	info->maxclients = 0;
 	info->clients = 0;
 	do {
-		if (!strcmp(ptr, "sv_maxclients"))
-			info->maxclients = atoi(strtok(NULL, "\\"));
-		else if (!strcmp(ptr, "clients"))
+		if (!strcasecmp(ptr, "sv_maxclients"))
+			info->maxclients += atoi(strtok(NULL, "\\"));
+		else if (!strcasecmp(ptr, "sv_privateclients"))
+			info->maxclients -= atoi(strtok(NULL, "\\"));
+		else if (!strcasecmp(ptr, "clients"))
 			info->clients = atoi(strtok(NULL, "\\"));
 
 		ptr = strtok(NULL, "\\");
