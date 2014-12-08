@@ -13,7 +13,7 @@ Features
 
 * Recommend servers and query q3-based ones.
 * Support multiple pickup lists.
-* !add !remove !who !promote commands accept multiple arguments.
+* !add !remove !who !promote !servers commands accept multiple arguments.
 * Track nick changes and autoremove on PART and QUIT.
 * Auth with Q.
 

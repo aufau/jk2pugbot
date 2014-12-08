@@ -453,9 +453,28 @@ void updateStatus()
 	statusChanged = false;
 }
 
+void announceServers(pickupNode_t *node, const char *to)
+{
+	int pos;
+
+	if (node) {
+		if (node->pickup->serverList) {
+			pos = snprintf(sbuf, BUFFER_SIZE,
+				       "PRIVMSG %s :Recommended %s servers: ",
+				       to, node->pickup->name);
+			pos = printServers(node->pickup->serverList, pos);
+			snprintf(sbuf + pos, BUFFER_SIZE - pos, "\r\n");
+			sbufRaw();
+		}
+
+		announceServers(node->next, to);
+	}
+}
+
 void announcePickup(pickup_t *pickup)
 {
 	int pos;
+	pickupNode_t *node;
 
 	pos = snprintf(sbuf, BUFFER_SIZE, "PRIVMSG ");
 	pos = printPlayers(pickup->playerList, pos, ",");
@@ -466,12 +485,9 @@ void announcePickup(pickup_t *pickup)
 	snprintf(sbuf + pos, BUFFER_SIZE - pos, "\r\n");
 	sbufRaw();
 
-	if (pickup->serverList) {
-		pos = snprintf(sbuf, BUFFER_SIZE, "PRIVMSG %s :Recommended servers: ", botChannel);
-		pos = printServers(pickup->serverList, pos);
-		snprintf(sbuf + pos, BUFFER_SIZE - pos, "\r\n");
-		sbufRaw();
-	}
+	node = pushPickup(NULL, pickup);
+	announceServers(node, botChannel);
+	popPickup(node);
 }
 
 void announcePlayers(pickupNode_t *node, const char *to)
@@ -546,6 +562,7 @@ void printHelp(const char *to)
 	raw("PRIVMSG %s :!remove - Remove yourself from all pickups.\r\n", to);
 	raw("PRIVMSG %s :!who - List players added to pickups\r\n", to);
 	raw("PRIVMSG %s :!promote - Promote a pickup game\r\n", to);
+	raw("PRIVMSG %s :!servers - List recommended servers\r\n", to);
 }
 
 void printVersion(const char *to)
@@ -564,13 +581,15 @@ int printGamesH(pickupNode_t *node, int pos)
 	}
 }
 
-void printGames()
+void printGames(const char *msg)
 {
 	int pos;
 
 	pos = snprintf(sbuf, BUFFER_SIZE, "PRIVMSG %s :Avaible pickup games are:", botChannel);
 	pos = printGamesH(allPickups, pos);
-	snprintf(sbuf + pos, BUFFER_SIZE - pos, ". Type !add <game> to sign up.\r\n");
+	pos += snprintf(sbuf + pos, BUFFER_SIZE - pos, ". ");
+	pos += snprintf(sbuf + pos, BUFFER_SIZE - pos, msg);
+	snprintf(sbuf + pos, BUFFER_SIZE - pos, "\r\n");
 	sbufRaw();
 }
 
@@ -669,14 +688,14 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 		if (pickupList)
 			addNick(pickupList, from);
 		else
-			printGames();
+			printGames("Type !add <game> to sign up.");
 	} else if (!strcmp(cmd, "remove")) {
 		if (!args)
 			purgeNick(from);
 		else if(pickupList)
 			removeNick(pickupList, from);
 		else
-			printGames();
+			printGames("Type !remove <game> to sign off.");
 	} else if (!strcmp(cmd, "who")) {
 		if (botSilentWho)
 			replyTo = from;
@@ -686,12 +705,17 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 		else if(pickupList)
 			announcePlayers(pickupList, replyTo);
 		else
-			printGames();
-	} else if (!strcmp(cmd, "promote")) {
+			printGames("Type !who <game> to see players who signed up already.");
+	} else if (!strcmp(cmd, "servers")) {
+		if (pickupList)
+			announceServers(pickupList, replyTo);
+		else
+			printGames("Type !servers <game> to see recommended servers.");
+	}else if (!strcmp(cmd, "promote")) {
 		if (pickupList)
 			promotePickup(pickupList);
 		else
-			printGames();
+			printGames("Type !promote <game> to find more players.");
 	} else if (!strcmp(cmd, "help")) {
 		printHelp(replyTo);
 	} else if (!strcmp(cmd, "version")) {
