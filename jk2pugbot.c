@@ -28,7 +28,7 @@ const char * const	botNick		= "JK2PUGBOT";
 const char * const	botChannel	= "#jk2pugbot";
 const char * const	botTopic	= "Welcome to #jk2pugbot";
 const char * const	botQpassword	= NULL;	// Password to auth with Q or NULL
-const int	botDelay	= 50000;	// Between messages. In microseconds
+const long	botDelay	= 50000;	// Between messages. In microseconds
 const int	botTimeout	= 300;		// Try to reconnect after this number of seconds
 const bool	botSilentWho	= true;		// Don't announce players in the main channel
 
@@ -66,13 +66,17 @@ void sbufRaw(void)
 {
 	time_t epochTime;
 	struct tm *locTime;
+	struct timeval timeout = {
+		.tv_sec = 0,
+		.tv_usec = botDelay
+	};
 
 	time(&epochTime);
 	locTime = localtime(&epochTime);
 	printf("%02d:%02d << %s", locTime->tm_hour, locTime->tm_min, bot.sbuf);
 	if (write(bot.conn, bot.sbuf, strlen(bot.sbuf)) == -1)
 		perror("sbufRaw write: ");
-	usleep(botDelay);
+	select(0, NULL, NULL, NULL, &timeout);
 }
 
 void raw(char *fmt, ...)
