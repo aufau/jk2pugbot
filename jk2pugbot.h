@@ -33,8 +33,8 @@
 #include <unistd.h>
 
 
-#define BUFFER_SIZE 513
-#define SVINFO_BUFFER_SIZE 1025
+#define MAX_MSG_LEN 512
+#define MAX_Q3_INFO_LEN 1024
 
 enum sv_type {
 	SV_NONE = 0,

@@ -21,16 +21,16 @@
  * Configuration
  */
 
-const char	*botVersion	= "beta";
-const char	*botHost	= "irc.quakenet.org";
-const char	*botPort	= "6667";
-const char	*botNick	= "JK2PUGBOT";
-const char	*botChannel	= "#jk2pugbot";
-const char	*botTopic	= "Welcome to #jk2pugbot";
-const char	*botQpassword	= NULL;		// Password to auth with Q or NULL
-int 		botDelay	= 50000;	// Between messages. In microseconds
-int		botTimeout	= 300;		// Try to reconnect after this number of seconds
-bool		botSilentWho	= true;		// Don't announce players in the main channel
+const char * const	botVersion	= "beta";
+const char * const	botHost		= "irc.quakenet.org";
+const char * const	botPort		= "6667";
+const char * const	botNick		= "JK2PUGBOT";
+const char * const	botChannel	= "#jk2pugbot";
+const char * const	botTopic	= "Welcome to #jk2pugbot";
+const char * const	botQpassword	= NULL;	// Password to auth with Q or NULL
+const int	botDelay	= 50000;	// Between messages. In microseconds
+const int	botTimeout	= 300;		// Try to reconnect after this number of seconds
+const bool	botSilentWho	= true;		// Don't announce players in the main channel
 
 pickup_t pickupsArray[] = {
 	{ .name = "MB", .max = 6 },
@@ -53,24 +53,24 @@ server_t serversArray[] = {
  * Code
  */
 
-int		conn;
-time_t		epochTime;
-struct tm	*locTime;
-char		buf[BUFFER_SIZE];
-char		sbuf[BUFFER_SIZE];
-char		svbuf[SVINFO_BUFFER_SIZE];
+struct {
+	int conn;		// irc server socket file descriptor
+	char sbuf[MAX_MSG_LEN];	// send buffer
+	bool statusChanged;
 
-pickupNode_t	*allPickups;
-playerNode_t	*nickList;
-
-bool	statusChanged = false;
+	pickupNode_t *allPickups;
+	playerNode_t *nickList;
+} bot;
 
 void sbufRaw(void)
 {
+	time_t epochTime;
+	struct tm *locTime;
+
 	time(&epochTime);
 	locTime = localtime(&epochTime);
-	printf("%02d:%02d << %s", locTime->tm_hour, locTime->tm_min, sbuf);
-	if (write(conn, sbuf, strlen(sbuf)) == -1)
+	printf("%02d:%02d << %s", locTime->tm_hour, locTime->tm_min, bot.sbuf);
+	if (write(bot.conn, bot.sbuf, strlen(bot.sbuf)) == -1)
 		perror("sbufRaw write: ");
 	usleep(botDelay);
 }
@@ -79,7 +79,7 @@ void raw(char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	vsnprintf(sbuf, 513, fmt, ap);
+	vsnprintf(bot.sbuf, sizeof(bot.sbuf), fmt, ap);
 	va_end(ap);
 	sbufRaw();
 }
@@ -94,12 +94,13 @@ void *smalloc(size_t size)
 void sigHandler(int signum)
 {
 	raw("QUIT :SIGINT\r\n");
-	close(conn);
+	close(bot.conn);
 	exit(EXIT_SUCCESS);
 }
 
 int getQ3ServerInfo(server_t *server, q3serverInfo_t *info)
 {
+	char svbuf[MAX_Q3_INFO_LEN + 1];
 	struct addrinfo hints;
 	struct addrinfo *res;
 	struct timeval timeout;
@@ -130,7 +131,7 @@ int getQ3ServerInfo(server_t *server, q3serverInfo_t *info)
 		return 0;
 	}
 
-	readlen = read(sv_sock, svbuf, SVINFO_BUFFER_SIZE - 1);
+	readlen = read(sv_sock, svbuf, MAX_Q3_INFO_LEN);
 	close(sv_sock);
 	if (readlen == -1)
 		return -1;
@@ -204,8 +205,8 @@ player_t *pushNick(const char *nick)
 	player->nick = smalloc(strlen(nick) + 1);
 	strcpy(player->nick, nick);
 	playerNode->player = player;
-	playerNode->next = nickList;
-	nickList = playerNode;
+	playerNode->next = bot.nickList;
+	bot.nickList = playerNode;
 	return player;
 }
 
@@ -278,7 +279,7 @@ player_t *findNickH(playerNode_t *node, const char *nick)
 
 player_t *findNick(const char *nick)
 {
-	return findNickH(nickList, nick);
+	return findNickH(bot.nickList, nick);
 }
 
 int countPlayers(playerNode_t *node)
@@ -296,7 +297,7 @@ void removePlayer(pickupNode_t *node, player_t *player)
 		if (playerNode) {
 			node->pickup->playerList = popPlayer(playerNode);
 			node->pickup->count--;
-			statusChanged = true;
+			bot.statusChanged = true;
 		}
 		removePlayer(node->next, player);
 	}
@@ -312,8 +313,8 @@ void removeNick(pickupNode_t *node, const char *nick)
 
 void purgePlayer(player_t *player)
 {
-	removePlayer(allPickups, player);
-	nickList = popPlayer(cutPlayer(nickList, player));
+	removePlayer(bot.allPickups, player);
+	bot.nickList = popPlayer(cutPlayer(bot.nickList, player));
 	free(player->nick);
 	free(player);
 }
@@ -343,7 +344,7 @@ void addPlayer(pickupNode_t *node, player_t *player)
 		} else {
 			node->pickup->playerList = pushPlayer(node->pickup->playerList, player);
 			node->pickup->count++;
-			statusChanged = true;
+			bot.statusChanged = true;
 			if (node->pickup->max && node->pickup->count == node->pickup->max) {
 				announcePickup(node->pickup);
 				purgePlayers(node->pickup->playerList);
@@ -380,7 +381,7 @@ int printPlayers(playerNode_t *node, int pos, const char *sep)
 	} else {
 		if (!node->next)
 			sep = "";
-		pos += snprintf(sbuf + pos, BUFFER_SIZE - pos, "%s%s", node->player->nick, sep);
+		pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, "%s%s", node->player->nick, sep);
 		return printPlayers(node->next, pos, sep);
 	}
 }
@@ -396,7 +397,7 @@ int printPickups(pickupNode_t *node, int pos)
 			formatString = node->pickup->count ?
 				"\x02(\x02 %s %d/%d \x02)\x02" :
 				"( %s %d/%d )";
-			pos += snprintf(sbuf + pos, BUFFER_SIZE - pos, formatString,
+			pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, formatString,
 					node->pickup->name,
 					node->pickup->count,
 					node->pickup->max);
@@ -404,7 +405,7 @@ int printPickups(pickupNode_t *node, int pos)
 			formatString = node->pickup->count ?
 				"\x02(\x02 %s %d \x02)\x02" :
 				"( %s %d )";
-			pos += snprintf(sbuf + pos, BUFFER_SIZE - pos, formatString,
+			pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, formatString,
 					node->pickup->name,
 					node->pickup->count);
 		}
@@ -425,13 +426,13 @@ int printServers(serverNode_t *node, int pos)
 			retVal = getQ3ServerInfo(node->server, &q3serverInfo);
 
 		if (retVal == 1) {
-			pos += snprintf(sbuf + pos, BUFFER_SIZE - pos,
+			pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos,
 					"\x02(\x02 %s %d/%d %s:%s \x02)\x02",
 					node->server->name, q3serverInfo.clients,
 					q3serverInfo.maxclients, node->server->address,
 					node->server->port);
 		} else if (retVal == -1) {
-			pos += snprintf(sbuf + pos, BUFFER_SIZE - pos,
+			pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos,
 					"\x02(\x02 %s %s:%s \x02)\x02",
 					node->server->name, node->server->address,
 					node->server->port);
@@ -445,12 +446,12 @@ void updateStatus()
 {
 	int pos;
 
-	pos = snprintf(sbuf, BUFFER_SIZE, "TOPIC %s :", botChannel);
-	pos = printPickups(allPickups, pos);
-	snprintf(sbuf + pos, BUFFER_SIZE - pos,
+	pos = snprintf(bot.sbuf, sizeof(bot.sbuf), "TOPIC %s :", botChannel);
+	pos = printPickups(bot.allPickups, pos);
+	snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos,
 		 "\x02(\x02 %s \x02)(\x02 Type !help for more info \x02)\x02\r\n", botTopic);
 	sbufRaw();
-	statusChanged = false;
+	bot.statusChanged = false;
 }
 
 void announceServers(pickupNode_t *node, const char *to)
@@ -459,11 +460,11 @@ void announceServers(pickupNode_t *node, const char *to)
 
 	if (node) {
 		if (node->pickup->serverList) {
-			pos = snprintf(sbuf, BUFFER_SIZE,
+			pos = snprintf(bot.sbuf, sizeof(bot.sbuf),
 				       "PRIVMSG %s :Recommended %s servers: ",
 				       to, node->pickup->name);
 			pos = printServers(node->pickup->serverList, pos);
-			snprintf(sbuf + pos, BUFFER_SIZE - pos, "\r\n");
+			snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, "\r\n");
 			sbufRaw();
 		}
 
@@ -476,13 +477,13 @@ void announcePickup(pickup_t *pickup)
 	int pos;
 	pickupNode_t *node;
 
-	pos = snprintf(sbuf, BUFFER_SIZE, "PRIVMSG ");
+	pos = snprintf(bot.sbuf, sizeof(bot.sbuf), "PRIVMSG ");
 	pos = printPlayers(pickup->playerList, pos, ",");
-	pos += snprintf(sbuf + pos, BUFFER_SIZE - pos,
+	pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos,
 		 ",%s :\x02%s pickup is ready to start!\x02 Players are: ",
 		 botChannel, pickup->name);
 	pos = printPlayers(pickup->playerList, pos, ", ");
-	snprintf(sbuf + pos, BUFFER_SIZE - pos, "\r\n");
+	snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, "\r\n");
 	sbufRaw();
 
 	node = pushPickup(NULL, pickup);
@@ -497,19 +498,19 @@ void announcePlayers(pickupNode_t *node, const char *to)
 			int pos;
 
 			if (node->pickup->max) {
-				pos = snprintf(sbuf, BUFFER_SIZE,
+				pos = snprintf(bot.sbuf, sizeof(bot.sbuf),
 					       "PRIVMSG %s :\x02(\x02 %s %d/%d \x02)\x02 Players are: ",
 					       to, node->pickup->name,
 					       node->pickup->count, node->pickup->max);
 			} else {
-				pos = snprintf(sbuf, BUFFER_SIZE,
+				pos = snprintf(bot.sbuf, sizeof(bot.sbuf),
 					       "PRIVMSG %s :\x02(\x02 %s %d \x02)\x02 Players are: ",
 					       to, node->pickup->name,
 					       node->pickup->count);
 			}
 
 			pos = printPlayers(node->pickup->playerList, pos, ", ");
-			snprintf(sbuf + pos, BUFFER_SIZE - pos, "\r\n");
+			snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, "\r\n");
 			sbufRaw();
 		}
 		announcePlayers(node->next, to);
@@ -576,7 +577,7 @@ int printGamesH(pickupNode_t *node, int pos)
 	if (!node) {
 		return pos;
 	} else {
-		pos += snprintf(sbuf + pos, BUFFER_SIZE - pos, " %s", node->pickup->name);
+		pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, " %s", node->pickup->name);
 		return printGamesH(node->next, pos);
 	}
 }
@@ -585,11 +586,11 @@ void printGames(const char *msg)
 {
 	int pos;
 
-	pos = snprintf(sbuf, BUFFER_SIZE, "PRIVMSG %s :Avaible pickup games are:", botChannel);
-	pos = printGamesH(allPickups, pos);
-	pos += snprintf(sbuf + pos, BUFFER_SIZE - pos, ". ");
-	pos += snprintf(sbuf + pos, BUFFER_SIZE - pos, msg);
-	snprintf(sbuf + pos, BUFFER_SIZE - pos, "\r\n");
+	pos = snprintf(bot.sbuf, sizeof(bot.sbuf), "PRIVMSG %s :Avaible pickup games are:", botChannel);
+	pos = printGamesH(bot.allPickups, pos);
+	pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, ". ");
+	pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, msg);
+	snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, "\r\n");
 	sbufRaw();
 }
 
@@ -612,7 +613,7 @@ pickupNode_t *parsePickupList(const char *list)
 	if (!list) {
 		return NULL;
 	} else {
-		pickup_t *pickup = parsePickupListH(allPickups, list);
+		pickup_t *pickup = parsePickupListH(bot.allPickups, list);
 		list = strtok(NULL, " ");
 		if (pickup)
 			return pushPickup(parsePickupList(list), pickup);
@@ -623,6 +624,8 @@ pickupNode_t *parsePickupList(const char *list)
 
 bool parseBuf(char *buf, message_t *message)
 {
+	time_t epochTime;
+	struct tm *locTime;
 	static char *saveptr;
 	char *ptr;
 	char *trailingptr;
@@ -701,7 +704,7 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 			replyTo = from;
 
 		if (!args)
-			announcePlayers(allPickups, replyTo);
+			announcePlayers(bot.allPickups, replyTo);
 		else if(pickupList)
 			announcePlayers(pickupList, replyTo);
 		else
@@ -768,7 +771,7 @@ void initPickups()
 	int i;
 
 	for (i = 0; i < sizeof(pickupsArray) / sizeof(*pickupsArray); i++)
-		allPickups = pushPickup(allPickups, &pickupsArray[i]);
+		bot.allPickups = pushPickup(bot.allPickups, &pickupsArray[i]);
 
 	for (i = 0; i < sizeof(serversArray) / sizeof(*serversArray); i++) {
 		games = strdup(serversArray[i].games);
@@ -782,10 +785,10 @@ void initPickups()
 #ifdef DEBUG
 void printLists()
 {
-	if(nickList) {
-		printf("nickList = ");
-		printPlayers(nickList, 0, "->");
-		printf(sbuf);
+	if(bot.nickList) {
+		printf("bot.nickList = ");
+		printPlayers(bot.nickList, 0, "->");
+		printf(bot.sbuf);
 		printf("\n");
 	}
 }
@@ -793,6 +796,7 @@ void printLists()
 
 int main()
 {
+	char buf[MAX_MSG_LEN + 1];
 	message_t message;
 
 	struct addrinfo hints;
@@ -816,7 +820,7 @@ int main()
 	initPickups();
 
 connect:
-	purgePlayers(nickList);
+	purgePlayers(bot.nickList);
 
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
@@ -831,13 +835,13 @@ connect:
 		sleep(botTimeout);
 		goto connect;
 	}
-	conn = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-	if (conn == -1) {
+	bot.conn = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+	if (bot.conn == -1) {
 		perror("socket: ");
 		sleep(botTimeout);
 		goto connect;
 	}
-	retVal = connect(conn, res->ai_addr, res->ai_addrlen);
+	retVal = connect(bot.conn, res->ai_addr, res->ai_addrlen);
 	if (retVal == -1) {
 		perror("connect: ");
 		sleep(botTimeout);
@@ -849,10 +853,10 @@ connect:
 
 	while (true) {
 		FD_ZERO(&set);
-		FD_SET(conn, &set);
+		FD_SET(bot.conn, &set);
 		timeout.tv_sec = botTimeout;
 		timeout.tv_usec = 0;
-		retVal = select(conn + 1, &set, NULL, NULL, &timeout);
+		retVal = select(bot.conn + 1, &set, NULL, NULL, &timeout);
 		if (retVal == -1) {
 			perror("select: ");
 			sleep(botTimeout);
@@ -862,7 +866,7 @@ connect:
 			goto connect;
 		}
 
-		bufLen = read(conn, buf, 512);
+		bufLen = read(bot.conn, buf, sizeof(buf));
 		if (bufLen <= 0) {
 			perror("read: ");
 			sleep(botTimeout);
@@ -876,7 +880,7 @@ connect:
 			printLists();
 #endif
 		} while (parseBuf(NULL, &message));
-		if (statusChanged)
+		if (bot.statusChanged)
 			updateStatus();
 	}
 }
