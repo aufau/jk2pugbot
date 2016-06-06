@@ -666,9 +666,9 @@ bool parseBuf(char *buf, message_t *message)
 
 		ptr = strtok(NULL, " ");
 		if (!ptr)
-			return true; // Malformed message
+			return parseBuf(NULL, message); // Malformed message
 	} else {
-		// message->prefix = NULL;
+		memset(&message->prefix, 0, sizeof(message->prefix));
 	}
 	message->command = ptr;
 
@@ -786,21 +786,21 @@ void initPickups()
 	}
 }
 
-#ifdef DEBUG
 void printLists()
 {
+#ifndef NDEBUG
 	if(bot.nickList) {
 		printf("bot.nickList = ");
 		printPlayers(bot.nickList, 0, "->");
 		printf(bot.sbuf);
 		printf("\n");
 	}
-}
 #endif
+}
 
 int main()
 {
-	char buf[MAX_MSG_LEN + 1];
+	char buf[2048];
 	message_t message;
 
 	struct addrinfo hints;
@@ -822,7 +822,6 @@ int main()
 	sigaction(SIGINT, &act, NULL);
 
 	initPickups();
-
 connect:
 	purgePlayers(bot.nickList);
 
@@ -856,6 +855,7 @@ connect:
 	raw("NICK %s\r\n", botNick);
 
 	while (true) {
+		// Wait for new messages
 		FD_ZERO(&set);
 		FD_SET(bot.conn, &set);
 		timeout.tv_sec = botTimeout;
@@ -870,20 +870,27 @@ connect:
 			goto connect;
 		}
 
-		bufLen = read(bot.conn, buf, sizeof(buf));
-		if (bufLen <= 0) {
+		// Receive TCP packet
+		// Assuming (incorrectly) that it is not fragmented
+		bufLen = read(bot.conn, buf, sizeof(buf) - 1);
+		if (bufLen == -1) {
 			perror("read: ");
-			sleep(botTimeout);
+			goto connect;
+		} else if (bufLen == 0) { // FIN
+			printf("\nConnection closed. Reconnecting...\n\n");
 			goto connect;
 		}
-		buf[bufLen + 1] = '\0';
-		parseBuf(buf, &message);
+		buf[bufLen] = '\0';
+
+		// Parse messages
+		if (!parseBuf(buf, &message))
+			continue;
+
 		do {
 			messageReply(&message);
-#ifdef DEBUG
 			printLists();
-#endif
 		} while (parseBuf(NULL, &message));
+
 		if (bot.statusChanged)
 			updateStatus();
 	}
