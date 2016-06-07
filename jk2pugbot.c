@@ -74,8 +74,10 @@ void sbufRaw(void)
 	time(&epochTime);
 	locTime = localtime(&epochTime);
 	printf("%02d:%02d << %s", locTime->tm_hour, locTime->tm_min, bot.sbuf);
+#ifndef DEBUG_INTERCEPT
 	if (write(bot.conn, bot.sbuf, strlen(bot.sbuf)) == -1)
 		perror("sbufRaw write: ");
+#endif
 	select(0, NULL, NULL, NULL, &timeout);
 }
 
@@ -823,7 +825,9 @@ int main()
 	initPickups();
 connect:
 	purgePlayers(bot.nickList);
-
+#ifdef DEBUG_INTERCEPT
+	bot.conn = STDIN_FILENO;
+#else
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
@@ -849,7 +853,7 @@ connect:
 		sleep(botTimeout);
 		goto connect;
 	}
-
+#endif // !DEBUG_INTERCEPT
 	raw("USER %s 0 0 :%s\r\n", botNick, botNick);
 	raw("NICK %s\r\n", botNick);
 
