@@ -626,22 +626,18 @@ pickupNode_t *parsePickupList(const char *list)
 	}
 }
 
-bool parseBuf(char *buf, message_t *message)
+// Parses IRC message string with \r\n removed. Returns true on sucess
+// and false for malformed input.
+bool parseMessage(char *ptr, char *msgEnd, message_t *message)
 {
 	time_t epochTime;
 	struct tm *locTime;
-	static char *saveptr;
-	char *ptr;
 	char *trailingptr;
 
-	ptr = buf ? buf : saveptr;
-	saveptr = strstr(ptr, "\r\n");
-	if (saveptr) {
-		saveptr[0] = '\0';
-		saveptr += 2;
-	} else {
+	if (msgEnd - ptr > MAX_MSG_LEN - 2)
 		return false;
-	}
+
+	*msgEnd = '\0';
 
 	time(&epochTime);
 	locTime = localtime(&epochTime);
@@ -666,7 +662,7 @@ bool parseBuf(char *buf, message_t *message)
 
 		ptr = strtok(NULL, " ");
 		if (!ptr)
-			return parseBuf(NULL, message); // Malformed message
+			return false;
 	} else {
 		memset(&message->prefix, 0, sizeof(message->prefix));
 	}
@@ -809,7 +805,10 @@ int main()
 	fd_set	set;
 	struct timeval timeout;
 	int	retVal;
-	int	bufLen;
+	int	msgLen;
+	char	*bufEnd;
+	char	*msgStart;
+	char	*msgEnd;
 
 	struct sigaction act = {
 		.sa_handler	= sigHandler,
@@ -854,8 +853,9 @@ connect:
 	raw("USER %s 0 0 :%s\r\n", botNick, botNick);
 	raw("NICK %s\r\n", botNick);
 
+	msgLen = 0;
 	while (true) {
-		// Wait for new messages
+		// Wait for a TCP packet
 		FD_ZERO(&set);
 		FD_SET(bot.conn, &set);
 		timeout.tv_sec = botTimeout;
@@ -870,26 +870,39 @@ connect:
 			goto connect;
 		}
 
-		// Receive TCP packet
-		// Assuming (incorrectly) that it is not fragmented
-		bufLen = read(bot.conn, buf, sizeof(buf) - 1);
-		if (bufLen == -1) {
+		// Receive packet
+		assert(sizeof(buf) - msgLen - 1 > 0);
+		retVal = read(bot.conn, &buf[msgLen], sizeof(buf) - msgLen - 1);
+		if (retVal == -1) {
 			perror("read: ");
 			goto connect;
-		} else if (bufLen == 0) { // FIN
+		} else if (retVal == 0) { // FIN
 			printf("\nConnection closed. Reconnecting...\n\n");
 			goto connect;
 		}
-		buf[bufLen] = '\0';
+		bufEnd = &buf[msgLen + retVal];
+		*bufEnd = '\0';
 
-		// Parse messages
-		if (!parseBuf(buf, &message))
-			continue;
+		// Parse mesages
+		msgStart = buf;
+		while ((msgEnd = strstr(msgStart, "\r\n"))) {
+			if (parseMessage(msgStart, msgEnd, &message)) {
+				messageReply(&message);
+				printLists();
+			}
 
-		do {
-			messageReply(&message);
-			printLists();
-		} while (parseBuf(NULL, &message));
+			msgStart = msgEnd + 2;
+		}
+
+		// Save partial message for next read
+		msgLen = 0;
+		if (msgStart < bufEnd) {
+			msgLen = bufEnd - msgStart;
+			if (msgLen < MAX_MSG_LEN)
+				memmove(buf, msgStart, msgLen);
+			else
+				msgLen = 0;
+		}
 
 		if (bot.statusChanged)
 			updateStatus();
