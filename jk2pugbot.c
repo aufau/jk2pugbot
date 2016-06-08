@@ -59,8 +59,8 @@ struct {
 	char *cursor;
 	bool statusChanged;
 
-	pickupNode_t *allPickups;
-	playerNode_t *nickList;
+	pickupNode_t *pickupList;
+	playerNode_t *playerList;
 } bot;
 
 void __attribute__ ((noreturn)) com_error(const char *format, ...)
@@ -314,8 +314,8 @@ player_t *pushNick(const char *nick)
 	player->nick = com_malloc(strlen(nick) + 1);
 	strcpy(player->nick, nick);
 	playerNode->player = player;
-	playerNode->next = bot.nickList;
-	bot.nickList = playerNode;
+	playerNode->next = bot.playerList;
+	bot.playerList = playerNode;
 	return player;
 }
 
@@ -388,7 +388,7 @@ player_t *findNickH(playerNode_t *node, const char *nick)
 
 player_t *findNick(const char *nick)
 {
-	return findNickH(bot.nickList, nick);
+	return findNickH(bot.playerList, nick);
 }
 
 int countPlayers(playerNode_t *node)
@@ -412,6 +412,14 @@ void removePlayer(pickupNode_t *node, player_t *player)
 	}
 }
 
+void removePlayers(pickupNode_t *pickupNode, playerNode_t *node)
+{
+	if (node) {
+		removePlayer(pickupNode, node->player);
+		removePlayers(pickupNode, node->next);
+	}
+}
+
 void removeNick(pickupNode_t *node, const char *nick)
 {
 	player_t *player = findNick(nick);
@@ -420,28 +428,28 @@ void removeNick(pickupNode_t *node, const char *nick)
 	}
 }
 
-void purgePlayer(player_t *player)
+void forgetPlayer(player_t *player)
 {
-	removePlayer(bot.allPickups, player);
-	bot.nickList = popPlayer(cutPlayer(bot.nickList, player));
+	removePlayer(bot.pickupList, player);
+	bot.playerList = popPlayer(cutPlayer(bot.playerList, player));
 	free(player->nick);
 	free(player);
 }
 
-void purgePlayers(playerNode_t *node)
+void forgetPlayers(playerNode_t *node)
 {
 	if (node) {
 		playerNode_t *playerNode = node->next;
-		purgePlayer(node->player);
-		purgePlayers(playerNode);
+		forgetPlayer(node->player);
+		forgetPlayers(playerNode);
 	}
 }
 
-void purgeNick(const char *nick)
+void forgetNick(const char *nick)
 {
 	player_t *player = findNick(nick);
 	if (player)
-		purgePlayer(player);
+		forgetPlayer(player);
 }
 
 void addPlayer(pickupNode_t *node, player_t *player)
@@ -456,7 +464,8 @@ void addPlayer(pickupNode_t *node, player_t *player)
 			bot.statusChanged = true;
 			if (node->pickup->max && node->pickup->count == node->pickup->max) {
 				announcePickup(node->pickup);
-				purgePlayers(node->pickup->playerList);
+				removePlayers(bot.pickupList,
+					      node->pickup->playerList);
 				return;
 			}
 		}
@@ -543,7 +552,7 @@ void printServers(serverNode_t *node)
 void updateStatus()
 {
 	bot_printf("TOPIC %s :", botChannel);
-	printPickups(bot.allPickups);
+	printPickups(bot.pickupList);
 	bot_printf("\x02(\x02 %s \x02)(\x02 Type !help for more info \x02)\x02\r\n", botTopic);
 	bot.statusChanged = false;
 }
@@ -670,7 +679,7 @@ void printGamesH(pickupNode_t *node)
 void printGames(const char *msg)
 {
 	bot_printf("PRIVMSG %s :Avaible pickup games are:", botChannel);
-	printGamesH(bot.allPickups);
+	printGamesH(bot.pickupList);
 	bot_printf(". %s\r\n", msg);
 }
 
@@ -693,7 +702,7 @@ pickupNode_t *parsePickupList(const char *list)
 	if (!list) {
 		return NULL;
 	} else {
-		pickup_t *pickup = parsePickupListH(bot.allPickups, list);
+		pickup_t *pickup = parsePickupListH(bot.pickupList, list);
 		list = strtok(NULL, " ");
 		if (pickup)
 			return pushPickup(parsePickupList(list), pickup);
@@ -772,7 +781,7 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 			printGames("Type !add <game> to sign up.");
 	} else if (!strcmp(cmd, "remove")) {
 		if (!args)
-			purgeNick(from);
+			removeNick(bot.pickupList, from);
 		else if(pickupList)
 			removeNick(pickupList, from);
 		else
@@ -782,7 +791,7 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 			replyTo = from;
 
 		if (!args)
-			announcePlayers(bot.allPickups, replyTo);
+			announcePlayers(bot.pickupList, replyTo);
 		else if(pickupList)
 			announcePlayers(pickupList, replyTo);
 		else
@@ -832,11 +841,11 @@ void messageReply(message_t *message)
 	} else if (!strcmp(message->command, "PART") ||
 		   !strcmp(message->command, "QUIT")) {
 		if (message->prefix.nick)
-			purgeNick(message->prefix.nick);
+			forgetNick(message->prefix.nick);
 	} else if (!strcmp(message->command, "KICK")) {
 		if (message->parameter[0] && message->parameter[1] &&
 		    !strcmp(message->parameter[0], botChannel))
-			purgeNick(message->parameter[1]);
+			forgetNick(message->parameter[1]);
 	} else if (!strcmp(message->command, "NICK")) {
 		if (message->prefix.nick && message->trailing)
 			changeNick(message->prefix.nick, message->trailing);
@@ -856,7 +865,7 @@ void initPickups()
 	int i;
 
 	for (i = 0; i < sizeof(pickupsArray) / sizeof(*pickupsArray); i++)
-		bot.allPickups = pushPickup(bot.allPickups, &pickupsArray[i]);
+		bot.pickupList = pushPickup(bot.pickupList, &pickupsArray[i]);
 
 	for (i = 0; i < sizeof(serversArray) / sizeof(*serversArray); i++) {
 		games = strdup(serversArray[i].games);
@@ -870,10 +879,10 @@ void initPickups()
 void printLists()
 {
 #ifndef NDEBUG
-	if(bot.nickList) {
+	if(bot.playerList) {
 		bot_flush();
-		printf("bot.nickList = ");
-		printPlayers(bot.nickList, "->");
+		printf("bot.playerList = ");
+		printPlayers(bot.playerList, "->");
 		*bot.cursor = '\0';
 		puts(bot.sbuf);
 		bot.cursor = bot.sbuf;
@@ -910,7 +919,7 @@ int main()
 	initPickups();
 connect:
 	bot.cursor = bot.sbuf;
-	purgePlayers(bot.nickList);
+	forgetPlayers(bot.playerList);
 #ifdef DEBUG_INTERCEPT
 	bot.conn = STDIN_FILENO;
 #else
