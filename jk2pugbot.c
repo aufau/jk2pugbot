@@ -561,6 +561,7 @@ void announcePlayers(pickupNode_t *node, const char *to)
 void promotePickup(pickupNode_t *node)
 {
 	const char *pluralSuffix;
+	const char *pluralSuffixLeft;
 	const char *beForm;
 	pickupNode_t *pickupNode;
 
@@ -572,11 +573,15 @@ void promotePickup(pickupNode_t *node)
 			pluralSuffix = "s";
 			beForm = "are";
 		}
+		if (node->pickup->max - node->pickup->count == 1)
+			pluralSuffixLeft = "";
+		else
+			pluralSuffixLeft = "s";
 
 		if (node->pickup->max && node->pickup->count) {
 			bot_printf("PRIVMSG %s :\x02Only %d player%s needed for %s game!\x02 Type !add %s to sign up.\r\n",
 			    botChannel, node->pickup->max - node->pickup->count,
-			    pluralSuffix, node->pickup->name, node->pickup->name);
+			    pluralSuffixLeft, node->pickup->name, node->pickup->name);
 		} else if (node->pickup->count == 1 && !botSilentWho) {
 			bot_printf("PRIVMSG %s :\x02Wanna play %s? %s is waiting!\x02 Type !add %s\r\n",
 			    botChannel, node->pickup->name,
@@ -600,8 +605,8 @@ void printHelp(const char *to)
 {
 	bot_printf("PRIVMSG %s :You can type commands in the main channel or query the bot.\r\n", to);
 	bot_printf("PRIVMSG %s :!help, !version - print info messages\r\n", to);
-	bot_printf("PRIVMSG %s :!add - Add up to a pickup game.\r\n", to);
-	bot_printf("PRIVMSG %s :!remove - Remove yourself from all pickups.\r\n", to);
+	bot_printf("PRIVMSG %s :!add - Add up to a pickup game\r\n", to);
+	bot_printf("PRIVMSG %s :!remove - Remove yourself from all pickups\r\n", to);
 	bot_printf("PRIVMSG %s :!who - List players added to pickups\r\n", to);
 	bot_printf("PRIVMSG %s :!promote - Promote a pickup game\r\n", to);
 	bot_printf("PRIVMSG %s :!servers - List recommended servers\r\n", to);
