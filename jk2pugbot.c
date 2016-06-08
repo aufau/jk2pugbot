@@ -62,7 +62,7 @@ struct {
 	playerNode_t *nickList;
 } bot;
 
-void com_error(const char *format, ...)
+void __attribute__ ((noreturn)) com_error(const char *format, ...)
 {
 	va_list ap;
 
@@ -718,6 +718,8 @@ bool parseMessage(char *ptr, char *msgEnd, message_t *message)
 	locTime = localtime(&epochTime);
 	printf("%02d:%02d >> %s\n", locTime->tm_hour, locTime->tm_min, ptr);
 
+	memset(message, 0, sizeof(*message));
+
 	// Find <trailing> sequence
 	trailingptr = strstr(ptr, " :");
 	if (trailingptr) {
@@ -808,9 +810,13 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 void messageReply(message_t *message)
 {
 	if (!strcmp(message->command, "PING")) {
-		bot_printf("PONG :%s\r\n", message->trailing);
+		if (message->trailing)
+			bot_printf("PONG :%s\r\n", message->trailing);
+		else
+			bot_puts("PONG");
 	} else if (!strcmp(message->command, "PRIVMSG")) {
-		if (message->trailing[0] == '!') {
+		if (message->trailing && message->trailing[0] == '!' &&
+			message->parameter[0] && message->prefix.nick) {
 			const char *replyTo;
 
 			if (!strcmp(message->parameter[0], botNick))
@@ -824,12 +830,15 @@ void messageReply(message_t *message)
 		}
 	} else if (!strcmp(message->command, "PART") ||
 		   !strcmp(message->command, "QUIT")) {
-		purgeNick(message->prefix.nick);
-	} else if (!strcmp(message->command, "KICK") &&
-		   !strcmp(message->parameter[0], botChannel)) {
-		purgeNick(message->parameter[1]);
+		if (message->prefix.nick)
+			purgeNick(message->prefix.nick);
+	} else if (!strcmp(message->command, "KICK")) {
+		if (message->parameter[0] && message->parameter[1] &&
+		    !strcmp(message->parameter[0], botChannel))
+			purgeNick(message->parameter[1]);
 	} else if (!strcmp(message->command, "NICK")) {
-		changeNick(message->prefix.nick, message->trailing);
+		if (message->prefix.nick && message->trailing)
+			changeNick(message->prefix.nick, message->trailing);
 	} else if (!strcmp(message->command, "001")) {
 		if (botQpassword) {
 			bot_printf("PRIVMSG Q@CServe.quakenet.org :AUTH %s %s\r\n",
