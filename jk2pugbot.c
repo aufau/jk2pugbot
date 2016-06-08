@@ -63,6 +63,32 @@ struct {
 	playerNode_t *nickList;
 } bot;
 
+void *com_malloc(size_t size)
+{
+	void *retval = malloc(size);
+	assert(retval);
+	return retval;
+}
+
+ssize_t com_write(int fildes, const void *buf, size_t nbyte)
+{
+	ssize_t len;
+	size_t written = 0;
+
+	while (written < nbyte) {
+		len = write(fildes, (char *)buf + written, nbyte - written);
+		written += len;
+
+		if (len == -1) {
+			perror("com_write: ");
+			break;
+		}
+		if (len == 0)
+			break;
+	}
+	return written;
+}
+
 /* Buffered IRC server output
  * functions
  */
@@ -80,13 +106,13 @@ int bot_flush(void)
 	printf("%02d:%02d << %s", locTime->tm_hour, locTime->tm_min, bot.sbuf);
 
 #ifndef DEBUG_INTERCEPT
+	int writeLen = bot.cursor - bot.sbuf;
 	struct timeval timeout = {
 		.tv_sec = 0,
 		.tv_usec = botDelay
 	};
 
-	if (write(bot.conn, bot.sbuf, bot.cursor - bot.sbuf) == -1) {
-		perror("write: ");
+	if (com_write(bot.conn, bot.sbuf, writeLen) < writeLen) {
 		return EOF;
 	}
 
@@ -148,13 +174,6 @@ int bot_printf(const char *format, ...)
 	memcpy(bot.cursor, buf, len);
 	bot.cursor += len;
 	return len;
-}
-
-void *com_malloc(size_t size)
-{
-	void *retval = malloc(size);
-	assert(retval);
-	return retval;
 }
 
 void sigHandler(int signum)
