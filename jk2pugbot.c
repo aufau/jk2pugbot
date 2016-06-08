@@ -114,6 +114,60 @@ ssize_t com_write(int fildes, const void *buf, size_t nbyte)
 	return written;
 }
 
+/* IRC protocol-specific
+ * functions
+ */
+int irc_islower(int c)
+{
+	return (c >= 'a' && c <= 'z');
+}
+
+int irc_isupper(int c)
+{
+	return (c >= 'A' && c <= 'Z');
+}
+
+int irc_isalpha(int c)
+{
+	return irc_islower(c) || irc_isupper(c);
+}
+
+int irc_isdigit(int c)
+{
+	return (c >= '0' && c <= '9');
+}
+
+int irc_isspecial(int c)
+{
+	// "[", "]", "\", "`", "_", "^", "{", "|", "}"
+	return ((c >= 0x5b && c <= 0x60) ||
+		(c >= 0x7b && c <= 0x7d));
+}
+
+bool irc_validateNick(const char *nick)
+{
+	int i;
+
+	if (!nick)
+		return false;
+
+	// nickname   =  ( letter / special ) *8( letter / digit / special / "-" )
+	if (!irc_isalpha(nick[0]) && !irc_isspecial(nick[0]))
+		return false;
+
+	for (i = 1; i <= 9; i++) {
+		int ch = nick[i];
+
+		if (!ch)
+			return true;
+		if (!irc_isalpha(ch) && !irc_isspecial(ch) &&
+		    !irc_isdigit(ch) && ch != '-')
+			return false;
+	}
+
+	return false;
+}
+
 /* Buffered IRC server output
  * functions
  */
@@ -309,8 +363,13 @@ playerNode_t *popPlayer(playerNode_t *node)
 
 player_t *registerPlayer(const char *nick, bool op)
 {
-	playerNode_t *playerNode = com_malloc(sizeof(playerNode_t));
-	player_t *player = com_malloc(sizeof(player_t));
+	playerNode_t *playerNode;
+	player_t *player;
+
+	assert(irc_validateNick(nick));
+
+	playerNode = com_malloc(sizeof(playerNode_t));
+	player = com_malloc(sizeof(player_t));
 	player->nick = com_malloc(strlen(nick) + 1);
 	strcpy(player->nick, nick);
 	player->op = op;
@@ -389,6 +448,8 @@ player_t *findNickH(playerNode_t *node, const char *nick)
 
 player_t *findNick(const char *nick)
 {
+	assert(irc_validateNick(nick));
+
 	return findNickH(bot.playerList, nick);
 }
 
@@ -1017,6 +1078,7 @@ int main()
 	sigaction(SIGINT, &act, NULL);
 
 	initPickups();
+	assert(irc_validateNick(botNick));
 connect:
 	bot.cursor = bot.sbuf;
 	forgetPlayers(bot.playerList);
