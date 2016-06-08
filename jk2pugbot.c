@@ -28,7 +28,6 @@ const char * const	botNick		= "JK2PUGBOT";
 const char * const	botChannel	= "#jk2pugbot";
 const char * const	botTopic	= "Welcome to #jk2pugbot";
 const char * const	botQpassword	= NULL;	// Password to auth with Q or NULL
-const long	botDelay	= 50000;	// Between messages. In microseconds
 const int	botTimeout	= 300;		// Try to reconnect after this number of seconds
 const bool	botSilentWho	= true;		// Don't announce players in the main channel
 
@@ -133,18 +132,12 @@ int bot_flush(void)
 #ifndef DEBUG_INTERCEPT
 	size_t writeLen = bot.cursor - bot.sbuf;
 	size_t len;
-	struct timeval timeout = {
-		.tv_sec = 0,
-		.tv_usec = botDelay
-	};
 
 	len = com_write(bot.conn, bot.sbuf, writeLen);
 	if (len < writeLen) {
 		com_warning("bot_flush: Sent only %zd bytes out of %zd", len, writeLen);
 		return EOF;
 	}
-
-	select(0, NULL, NULL, NULL, &timeout);
 #endif
 	bot.cursor = bot.sbuf;
 	return 0;
