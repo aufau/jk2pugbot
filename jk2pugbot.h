@@ -103,4 +103,8 @@ typedef struct pickupNode_s {
 
 void announcePickup(pickup_t *pickup);
 
+typedef enum {
+	RPL_WELCOME		= 001,
+} reply_t;
+
 #endif // _MYIRCBOT_H_

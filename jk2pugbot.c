@@ -817,6 +817,23 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 	cleanPickupList(pickupList);
 }
 
+void numericReplyReply(int num, message_t *message)
+{
+	if (!message->parameter[0] || strcmp(message->parameter[0], botNick))
+		return;
+
+	// React to numeric reply
+	switch (num) {
+	case RPL_WELCOME:
+		if (botQpassword) {
+			bot_printf("PRIVMSG Q@CServe.quakenet.org :AUTH %s %s\r\n",
+				   botNick, botQpassword);
+		}
+		bot_printf("JOIN %s\r\n", botChannel);
+		break;
+	}
+}
+
 void messageReply(message_t *message)
 {
 	if (!strcmp(message->command, "PING")) {
@@ -849,12 +866,19 @@ void messageReply(message_t *message)
 	} else if (!strcmp(message->command, "NICK")) {
 		if (message->prefix.nick && message->trailing)
 			changeNick(message->prefix.nick, message->trailing);
-	} else if (!strcmp(message->command, "001")) {
-		if (botQpassword) {
-			bot_printf("PRIVMSG Q@CServe.quakenet.org :AUTH %s %s\r\n",
-			    botNick, botQpassword);
+	} else {
+		// Determine numeric reply number
+		int num = 0;
+		for (int i = 0; i < 3; i++) {
+			if (message->command[i] >= '0' && message->command[i] <= '9') {
+				num *= 10;
+				num += message->command[i] - '0';
+			} else {
+				return;
+			}
 		}
-		bot_printf("JOIN %s\r\n", botChannel);
+
+		numericReplyReply(num, message);
 	}
 }
 
