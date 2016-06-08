@@ -36,6 +36,9 @@
 #define MAX_MSG_LEN 512
 #define MAX_Q3_INFO_LEN 1024
 
+#define SEND_BUF_SIZE 4096
+#define RECV_BUF_SIZE 4096
+
 enum sv_type {
 	SV_NONE = 0,
 	SV_Q3

@@ -54,40 +54,100 @@ server_t serversArray[] = {
  */
 
 struct {
-	int conn;		// irc server socket file descriptor
-	char sbuf[MAX_MSG_LEN];	// send buffer
+	int conn;			// irc server socket file descriptor
+	char sbuf[SEND_BUF_SIZE + 1];	// send buffer; +1 for closing \0 when printing
+	char *cursor;
 	bool statusChanged;
 
 	pickupNode_t *allPickups;
 	playerNode_t *nickList;
 } bot;
 
-void sbufRaw(void)
+/* Buffered IRC server output
+ * functions
+ */
+int bot_flush(void)
 {
 	time_t epochTime;
 	struct tm *locTime;
+
+	if (bot.cursor == bot.sbuf)
+		return 0;
+
+	time(&epochTime);
+	locTime = localtime(&epochTime);
+	*bot.cursor = '\0';
+	printf("%02d:%02d << %s", locTime->tm_hour, locTime->tm_min, bot.sbuf);
+
+#ifndef DEBUG_INTERCEPT
 	struct timeval timeout = {
 		.tv_sec = 0,
 		.tv_usec = botDelay
 	};
 
-	time(&epochTime);
-	locTime = localtime(&epochTime);
-	printf("%02d:%02d << %s", locTime->tm_hour, locTime->tm_min, bot.sbuf);
-#ifndef DEBUG_INTERCEPT
-	if (write(bot.conn, bot.sbuf, strlen(bot.sbuf)) == -1)
-		perror("sbufRaw write: ");
-#endif
+	if (write(bot.conn, bot.sbuf, bot.cursor - bot.sbuf) == -1) {
+		perror("write: ");
+		return EOF;
+	}
+
 	select(0, NULL, NULL, NULL, &timeout);
+#endif
+	bot.cursor = bot.sbuf;
+	return 0;
 }
 
-void raw(char *fmt, ...)
+int bot_puts(const char *s)
+{
+	int len = strlen(s);
+
+	if (len + 2 > SEND_BUF_SIZE)
+		return EOF;
+
+	if (bot.sbuf + SEND_BUF_SIZE <= bot.cursor + len + 2)
+		if (bot_flush())
+			return EOF;
+
+	memcpy(bot.cursor, s, len);
+	bot.cursor += len;
+	*bot.cursor++ = '\r';
+	*bot.cursor++ = '\n';
+	return len + 2;
+}
+
+int bot_putchar(int c)
+{
+	unsigned char ch = c;
+
+	if (bot.cursor >= bot.sbuf + SEND_BUF_SIZE)
+		if (bot_flush())
+			return EOF;
+
+	*bot.cursor++ = ch;
+	return ch;
+}
+
+int bot_printf(const char *format, ...)
 {
 	va_list ap;
-	va_start(ap, fmt);
-	vsnprintf(bot.sbuf, sizeof(bot.sbuf), fmt, ap);
+	char buf[SEND_BUF_SIZE + 1];
+	int len;
+
+	va_start(ap, format);
+	len = vsnprintf(buf, sizeof(buf), format, ap);
 	va_end(ap);
-	sbufRaw();
+
+	if (len < 0)
+		return -1;
+	if (len >= sizeof(buf))
+		return -1;
+
+	if (bot.cursor + len > bot.sbuf + SEND_BUF_SIZE)
+		if (bot_flush())
+			return -1;
+
+	memcpy(bot.cursor, buf, len);
+	bot.cursor += len;
+	return len;
 }
 
 void *smalloc(size_t size)
@@ -99,7 +159,7 @@ void *smalloc(size_t size)
 
 void sigHandler(int signum)
 {
-	raw("QUIT :SIGINT\r\n");
+	bot_printf("QUIT :SIGINT\r\n");
 	close(bot.conn);
 	exit(EXIT_SUCCESS);
 }
@@ -127,6 +187,8 @@ int getQ3ServerInfo(server_t *server, q3serverInfo_t *info)
 
 	sendto(sv_sock, getinfo, strlen(getinfo) + 1, 0, res->ai_addr, res->ai_addrlen);
 	freeaddrinfo(res);
+
+	bot_flush(); // Make sure we don't hold split messages
 
 	FD_ZERO(&set);
 	FD_SET(sv_sock, &set);
@@ -380,98 +442,79 @@ void changeNick(const char *nick, const char *newnick)
 	}
 }
 
-int printPlayers(playerNode_t *node, int pos, const char *sep)
+void printPlayers(playerNode_t *node, const char *sep)
 {
-	if (!node) {
-		return pos;
-	} else {
+	if (node) {
 		if (!node->next)
 			sep = "";
-		pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, "%s%s", node->player->nick, sep);
-		return printPlayers(node->next, pos, sep);
+		bot_printf("%s%s", node->player->nick, sep);
+		printPlayers(node->next, sep);
 	}
 }
 
-int printPickups(pickupNode_t *node, int pos)
+void printPickups(pickupNode_t *node)
 {
-	if (!node) {
-		return pos;
-	} else {
+	if (node) {
 		const char *formatString;
 
 		if (node->pickup->max) {
 			formatString = node->pickup->count ?
 				"\x02(\x02 %s %d/%d \x02)\x02" :
 				"( %s %d/%d )";
-			pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, formatString,
-					node->pickup->name,
-					node->pickup->count,
-					node->pickup->max);
+			bot_printf(formatString, node->pickup->name,
+				   node->pickup->count, node->pickup->max);
 		} else {
 			formatString = node->pickup->count ?
 				"\x02(\x02 %s %d \x02)\x02" :
 				"( %s %d )";
-			pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, formatString,
-					node->pickup->name,
-					node->pickup->count);
+			bot_printf(formatString, node->pickup->name,
+				   node->pickup->count);
 		}
-		return printPickups(node->next, pos);
+		printPickups(node->next);
 	}
 }
 
-int printServers(serverNode_t *node, int pos)
+void printServers(serverNode_t *node)
 {
 	q3serverInfo_t q3serverInfo;
 
-	if (!node) {
-		return pos;
-	} else {
+	if (node) {
 		int retVal = 0;
 
 		if (node->server->type == SV_Q3)
 			retVal = getQ3ServerInfo(node->server, &q3serverInfo);
 
 		if (retVal == 1) {
-			pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos,
-					"\x02(\x02 %s %d/%d %s:%s \x02)\x02",
-					node->server->name, q3serverInfo.clients,
-					q3serverInfo.maxclients, node->server->address,
-					node->server->port);
+			bot_printf("\x02(\x02 %s %d/%d %s:%s \x02)\x02",
+				   node->server->name, q3serverInfo.clients,
+				   q3serverInfo.maxclients, node->server->address,
+				   node->server->port);
 		} else if (retVal == -1) {
-			pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos,
-					"\x02(\x02 %s %s:%s \x02)\x02",
-					node->server->name, node->server->address,
-					node->server->port);
+			bot_printf("\x02(\x02 %s %s:%s \x02)\x02",
+				   node->server->name, node->server->address,
+				   node->server->port);
 		}
-		return printServers(node->next, pos);
+		printServers(node->next);
 	}
 }
 
 
 void updateStatus()
 {
-	int pos;
-
-	pos = snprintf(bot.sbuf, sizeof(bot.sbuf), "TOPIC %s :", botChannel);
-	pos = printPickups(bot.allPickups, pos);
-	snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos,
-		 "\x02(\x02 %s \x02)(\x02 Type !help for more info \x02)\x02\r\n", botTopic);
-	sbufRaw();
+	bot_printf("TOPIC %s :", botChannel);
+	printPickups(bot.allPickups);
+	bot_printf("\x02(\x02 %s \x02)(\x02 Type !help for more info \x02)\x02\r\n", botTopic);
 	bot.statusChanged = false;
 }
 
 void announceServers(pickupNode_t *node, const char *to)
 {
-	int pos;
-
 	if (node) {
 		if (node->pickup->serverList) {
-			pos = snprintf(bot.sbuf, sizeof(bot.sbuf),
-				       "PRIVMSG %s :Recommended %s servers: ",
-				       to, node->pickup->name);
-			pos = printServers(node->pickup->serverList, pos);
-			snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, "\r\n");
-			sbufRaw();
+			bot_printf("PRIVMSG %s :Recommended %s servers: ",
+				   to, node->pickup->name);
+			printServers(node->pickup->serverList);
+			bot_printf("\r\n");
 		}
 
 		announceServers(node->next, to);
@@ -480,17 +523,14 @@ void announceServers(pickupNode_t *node, const char *to)
 
 void announcePickup(pickup_t *pickup)
 {
-	int pos;
 	pickupNode_t *node;
 
-	pos = snprintf(bot.sbuf, sizeof(bot.sbuf), "PRIVMSG ");
-	pos = printPlayers(pickup->playerList, pos, ",");
-	pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos,
-		 ",%s :\x02%s pickup is ready to start!\x02 Players are: ",
-		 botChannel, pickup->name);
-	pos = printPlayers(pickup->playerList, pos, ", ");
-	snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, "\r\n");
-	sbufRaw();
+	bot_printf("PRIVMSG ");
+	printPlayers(pickup->playerList, ",");
+	bot_printf(",%s :\x02%s pickup is ready to start!\x02 Players are: ",
+		   botChannel, pickup->name);
+	printPlayers(pickup->playerList, ", ");
+	bot_printf("\r\n");
 
 	node = pushPickup(NULL, pickup);
 	announceServers(node, botChannel);
@@ -501,23 +541,18 @@ void announcePlayers(pickupNode_t *node, const char *to)
 {
 	if (node) {
 		if (node->pickup->count) {
-			int pos;
-
 			if (node->pickup->max) {
-				pos = snprintf(bot.sbuf, sizeof(bot.sbuf),
-					       "PRIVMSG %s :\x02(\x02 %s %d/%d \x02)\x02 Players are: ",
-					       to, node->pickup->name,
-					       node->pickup->count, node->pickup->max);
+				bot_printf("PRIVMSG %s :\x02(\x02 %s %d/%d \x02)\x02 Players are: ",
+					   to, node->pickup->name,
+					   node->pickup->count, node->pickup->max);
 			} else {
-				pos = snprintf(bot.sbuf, sizeof(bot.sbuf),
-					       "PRIVMSG %s :\x02(\x02 %s %d \x02)\x02 Players are: ",
-					       to, node->pickup->name,
-					       node->pickup->count);
+				bot_printf("PRIVMSG %s :\x02(\x02 %s %d \x02)\x02 Players are: ",
+					   to, node->pickup->name,
+					   node->pickup->count);
 			}
 
-			pos = printPlayers(node->pickup->playerList, pos, ", ");
-			snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, "\r\n");
-			sbufRaw();
+			printPlayers(node->pickup->playerList, ", ");
+			bot_printf("\r\n");
 		}
 		announcePlayers(node->next, to);
 	}
@@ -539,15 +574,15 @@ void promotePickup(pickupNode_t *node)
 		}
 
 		if (node->pickup->max && node->pickup->count) {
-			raw("PRIVMSG %s :\x02Only %d player%s needed for %s game!\x02 Type !add %s to sign up.\r\n",
+			bot_printf("PRIVMSG %s :\x02Only %d player%s needed for %s game!\x02 Type !add %s to sign up.\r\n",
 			    botChannel, node->pickup->max - node->pickup->count,
 			    pluralSuffix, node->pickup->name, node->pickup->name);
 		} else if (node->pickup->count == 1 && !botSilentWho) {
-			raw("PRIVMSG %s :\x02Wanna play %s? %s is waiting!\x02 Type !add %s\r\n",
+			bot_printf("PRIVMSG %s :\x02Wanna play %s? %s is waiting!\x02 Type !add %s\r\n",
 			    botChannel, node->pickup->name,
 			    node->pickup->playerList->player->nick, node->pickup->name);
 		} else if (node->pickup->count) {
-			raw("PRIVMSG %s :\x02Wanna play %s? There %s %d player%s waiting!\x02 Type !add %s\r\n",
+			bot_printf("PRIVMSG %s :\x02Wanna play %s? There %s %d player%s waiting!\x02 Type !add %s\r\n",
 			    botChannel, node->pickup->name, beForm, node->pickup->count,
 			    pluralSuffix, node->pickup->name);
 
@@ -563,41 +598,34 @@ void promotePickup(pickupNode_t *node)
 
 void printHelp(const char *to)
 {
-	raw("PRIVMSG %s :You can type commands in the main channel or query the bot.\r\n", to);
-	raw("PRIVMSG %s :!help, !version - print info messages\r\n", to);
-	raw("PRIVMSG %s :!add - Add up to a pickup game.\r\n", to);
-	raw("PRIVMSG %s :!remove - Remove yourself from all pickups.\r\n", to);
-	raw("PRIVMSG %s :!who - List players added to pickups\r\n", to);
-	raw("PRIVMSG %s :!promote - Promote a pickup game\r\n", to);
-	raw("PRIVMSG %s :!servers - List recommended servers\r\n", to);
+	bot_printf("PRIVMSG %s :You can type commands in the main channel or query the bot.\r\n", to);
+	bot_printf("PRIVMSG %s :!help, !version - print info messages\r\n", to);
+	bot_printf("PRIVMSG %s :!add - Add up to a pickup game.\r\n", to);
+	bot_printf("PRIVMSG %s :!remove - Remove yourself from all pickups.\r\n", to);
+	bot_printf("PRIVMSG %s :!who - List players added to pickups\r\n", to);
+	bot_printf("PRIVMSG %s :!promote - Promote a pickup game\r\n", to);
+	bot_printf("PRIVMSG %s :!servers - List recommended servers\r\n", to);
 }
 
 void printVersion(const char *to)
 {
-	raw("PRIVMSG %s :jk2pugbot %s by fau <faltec@gmail.com>\r\n", to, botVersion);
-	raw("PRIVMSG %s :Visit https://github.com/aufau/jk2pugbot for more\r\n", to);
+	bot_printf("PRIVMSG %s :jk2pugbot %s by fau <faltec@gmail.com>\r\n", to, botVersion);
+	bot_printf("PRIVMSG %s :Visit https://github.com/aufau/jk2pugbot for more\r\n", to);
 }
 
-int printGamesH(pickupNode_t *node, int pos)
+void printGamesH(pickupNode_t *node)
 {
-	if (!node) {
-		return pos;
-	} else {
-		pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, " %s", node->pickup->name);
-		return printGamesH(node->next, pos);
+	if (node) {
+		bot_printf(" %s", node->pickup->name);
+		printGamesH(node->next);
 	}
 }
 
 void printGames(const char *msg)
 {
-	int pos;
-
-	pos = snprintf(bot.sbuf, sizeof(bot.sbuf), "PRIVMSG %s :Avaible pickup games are:", botChannel);
-	pos = printGamesH(bot.allPickups, pos);
-	pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, ". ");
-	pos += snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, msg);
-	snprintf(bot.sbuf + pos, sizeof(bot.sbuf) - pos, "\r\n");
-	sbufRaw();
+	bot_printf("PRIVMSG %s :Avaible pickup games are:", botChannel);
+	printGamesH(bot.allPickups);
+	bot_printf(". %s\r\n", msg);
 }
 
 /* Message Parsing
@@ -726,7 +754,7 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 	} else if (!strcmp(cmd, "version")) {
 		printVersion(replyTo);
 	} else if (!strcmp(cmd, "ping")) {
-		raw("PRIVMSG %s :!pong\r\n", replyTo);
+		bot_printf("PRIVMSG %s :!pong\r\n", replyTo);
 	}
 
 	cleanPickupList(pickupList);
@@ -735,7 +763,7 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 void messageReply(message_t *message)
 {
 	if (!strcmp(message->command, "PING")) {
-		raw("PONG :%s\r\n", message->trailing);
+		bot_printf("PONG :%s\r\n", message->trailing);
 	} else if (!strcmp(message->command, "PRIVMSG")) {
 		if (message->trailing[0] == '!') {
 			const char *replyTo;
@@ -759,10 +787,10 @@ void messageReply(message_t *message)
 		changeNick(message->prefix.nick, message->trailing);
 	} else if (!strcmp(message->command, "001")) {
 		if (botQpassword) {
-			raw("PRIVMSG Q@CServe.quakenet.org :AUTH %s %s\r\n",
+			bot_printf("PRIVMSG Q@CServe.quakenet.org :AUTH %s %s\r\n",
 			    botNick, botQpassword);
 		}
-		raw("JOIN %s\r\n", botChannel);
+		bot_printf("JOIN %s\r\n", botChannel);
 	}
 }
 
@@ -788,17 +816,19 @@ void printLists()
 {
 #ifndef NDEBUG
 	if(bot.nickList) {
+		bot_flush();
 		printf("bot.nickList = ");
-		printPlayers(bot.nickList, 0, "->");
-		printf(bot.sbuf);
-		printf("\n");
+		printPlayers(bot.nickList, "->");
+		*bot.cursor = '\0';
+		puts(bot.sbuf);
+		bot.cursor = bot.sbuf;
 	}
 #endif
 }
 
 int main()
 {
-	char buf[2048];
+	char buf[RECV_BUF_SIZE];
 	message_t message;
 
 	struct addrinfo hints;
@@ -824,6 +854,7 @@ int main()
 
 	initPickups();
 connect:
+	bot.cursor = bot.sbuf;
 	purgePlayers(bot.nickList);
 #ifdef DEBUG_INTERCEPT
 	bot.conn = STDIN_FILENO;
@@ -854,8 +885,8 @@ connect:
 		goto connect;
 	}
 #endif // !DEBUG_INTERCEPT
-	raw("USER %s 0 0 :%s\r\n", botNick, botNick);
-	raw("NICK %s\r\n", botNick);
+	bot_printf("USER %s 0 0 :%s\r\n", botNick, botNick);
+	bot_printf("NICK %s\r\n", botNick);
 
 	msgLen = 0;
 	while (true) {
@@ -910,5 +941,8 @@ connect:
 
 		if (bot.statusChanged)
 			updateStatus();
+
+		// Send messages
+		bot_flush();
 	}
 }
