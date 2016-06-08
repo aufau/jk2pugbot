@@ -150,7 +150,7 @@ int bot_printf(const char *format, ...)
 	return len;
 }
 
-void *smalloc(size_t size)
+void *com_malloc(size_t size)
 {
 	void *retval = malloc(size);
 	assert(retval);
@@ -232,7 +232,7 @@ int getQ3ServerInfo(server_t *server, q3serverInfo_t *info)
 
 pickupNode_t *pushPickup(pickupNode_t *node, pickup_t *pickup)
 {
-	pickupNode_t *pickupNode = smalloc(sizeof(pickupNode_t));
+	pickupNode_t *pickupNode = com_malloc(sizeof(pickupNode_t));
 	pickupNode->pickup = pickup;
 	pickupNode->next = node;
 	return pickupNode;
@@ -268,9 +268,9 @@ playerNode_t *popPlayer(playerNode_t *node)
 
 player_t *pushNick(const char *nick)
 {
-	playerNode_t *playerNode = smalloc(sizeof(playerNode_t));
-	player_t *player = smalloc(sizeof(player_t));
-	player->nick = smalloc(strlen(nick) + 1);
+	playerNode_t *playerNode = com_malloc(sizeof(playerNode_t));
+	player_t *player = com_malloc(sizeof(player_t));
+	player->nick = com_malloc(strlen(nick) + 1);
 	strcpy(player->nick, nick);
 	playerNode->player = player;
 	playerNode->next = bot.nickList;
@@ -280,7 +280,7 @@ player_t *pushNick(const char *nick)
 
 playerNode_t *pushPlayer(playerNode_t *node, player_t *player)
 {
-	playerNode_t *playerNode = smalloc(sizeof(playerNode_t));
+	playerNode_t *playerNode = com_malloc(sizeof(playerNode_t));
 	playerNode->player = player;
 	playerNode->next = node;
 	return playerNode;
@@ -288,7 +288,7 @@ playerNode_t *pushPlayer(playerNode_t *node, player_t *player)
 
 serverNode_t *pushServer(serverNode_t *node, server_t *server)
 {
-	serverNode_t *serverNode = smalloc(sizeof(serverNode_t));
+	serverNode_t *serverNode = com_malloc(sizeof(serverNode_t));
 	serverNode->server = server;
 	serverNode->next = node;
 	return serverNode;
@@ -437,7 +437,7 @@ void changeNick(const char *nick, const char *newnick)
 	player_t *player = findNick(nick);
 	if (player) {
 		free(player->nick);
-		player->nick = smalloc(strlen(newnick) + 1);
+		player->nick = com_malloc(strlen(newnick) + 1);
 		strcpy(player->nick, newnick);
 	}
 }
