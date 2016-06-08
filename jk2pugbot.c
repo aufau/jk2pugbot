@@ -63,10 +63,35 @@ struct {
 	playerNode_t *nickList;
 } bot;
 
+void com_error(const char *format, ...)
+{
+	va_list ap;
+
+	va_start(ap, format);
+	vfprintf(stderr, format, ap);
+	va_end(ap);
+	putc('\n', stderr);
+
+	assert(0);
+	close(bot.conn);
+	exit(EXIT_FAILURE);
+}
+
+void com_warning(const char *format, ...)
+{
+	va_list ap;
+
+	va_start(ap, format);
+	vfprintf(stderr, format, ap);
+	va_end(ap);
+	putc('\n', stderr);
+}
+
 void *com_malloc(size_t size)
 {
 	void *retval = malloc(size);
-	assert(retval);
+	if (!retval)
+		com_error("malloc: Failed to allocate %zd bytes", size);
 	return retval;
 }
 
@@ -106,13 +131,16 @@ int bot_flush(void)
 	printf("%02d:%02d << %s", locTime->tm_hour, locTime->tm_min, bot.sbuf);
 
 #ifndef DEBUG_INTERCEPT
-	int writeLen = bot.cursor - bot.sbuf;
+	size_t writeLen = bot.cursor - bot.sbuf;
+	size_t len;
 	struct timeval timeout = {
 		.tv_sec = 0,
 		.tv_usec = botDelay
 	};
 
-	if (com_write(bot.conn, bot.sbuf, writeLen) < writeLen) {
+	len = com_write(bot.conn, bot.sbuf, writeLen);
+	if (len < writeLen) {
+		com_warning("bot_flush: Sent only %zd bytes out of %zd", len, writeLen);
 		return EOF;
 	}
 
@@ -892,7 +920,7 @@ connect:
 	}
 	retVal = getaddrinfo(botHost, botPort, &hints, &res);
 	if (retVal) {
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(retVal));
+		com_warning("getaddrinfo: %s", gai_strerror(retVal));
 		sleep(botTimeout);
 		goto connect;
 	}
@@ -925,7 +953,7 @@ connect:
 			sleep(botTimeout);
 			goto connect;
 		} else if (retVal == 0) {
-			printf("\nPing timeout. Reconnecting...\n\n");
+			com_warning("Ping timeout. Reconnecting...");
 			goto connect;
 		}
 
@@ -936,7 +964,7 @@ connect:
 			perror("read: ");
 			goto connect;
 		} else if (retVal == 0) { // FIN
-			printf("\nConnection closed. Reconnecting...\n\n");
+			com_warning("Connection closed. Reconnecting...");
 			goto connect;
 		}
 		bufEnd = &buf[msgLen + retVal];
