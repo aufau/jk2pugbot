@@ -67,6 +67,7 @@ typedef struct message_s {
 
 typedef struct player_s {
 	char *nick;
+	bool op;
 } player_t;
 
 typedef struct playerNode_s {
@@ -105,6 +106,8 @@ void announcePickup(pickup_t *pickup);
 
 typedef enum {
 	RPL_WELCOME		= 001,
+	RPL_NAMREPLY		= 353,
+	RPL_ENDOFNAMES		= 366,
 } reply_t;
 
 #endif // _MYIRCBOT_H_

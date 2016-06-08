@@ -307,12 +307,13 @@ playerNode_t *popPlayer(playerNode_t *node)
 	return NULL;
 }
 
-player_t *pushNick(const char *nick)
+player_t *registerPlayer(const char *nick, bool op)
 {
 	playerNode_t *playerNode = com_malloc(sizeof(playerNode_t));
 	player_t *player = com_malloc(sizeof(player_t));
 	player->nick = com_malloc(strlen(nick) + 1);
 	strcpy(player->nick, nick);
+	player->op = op;
 	playerNode->player = player;
 	playerNode->next = bot.playerList;
 	bot.playerList = playerNode;
@@ -476,8 +477,10 @@ void addPlayer(pickupNode_t *node, player_t *player)
 void addNick(pickupNode_t *node, const char *nick)
 {
 	player_t *player = findNick(nick);
-	if (!player && node)
-		player = pushNick(nick);
+	if (!player && node) {
+		player = registerPlayer(nick, false);
+		com_warning("addNick: Player %s was not registered", nick);
+	}
 
 	addPlayer(node, player);
 }
@@ -492,13 +495,17 @@ void changeNick(const char *nick, const char *newnick)
 	}
 }
 
-void printPlayers(playerNode_t *node, const char *sep)
+void printPlayers(playerNode_t *node, const char *sep, bool op)
 {
 	if (node) {
+		const char *opMark = "";
+
 		if (!node->next)
 			sep = "";
-		bot_printf("%s%s", node->player->nick, sep);
-		printPlayers(node->next, sep);
+		if (op && node->player->op)
+			opMark = "@";
+		bot_printf("%s%s%s", opMark, node->player->nick, sep);
+		printPlayers(node->next, sep, op);
 	}
 }
 
@@ -576,10 +583,10 @@ void announcePickup(pickup_t *pickup)
 	pickupNode_t *node;
 
 	bot_printf("PRIVMSG ");
-	printPlayers(pickup->playerList, ",");
+	printPlayers(pickup->playerList, ",", false);
 	bot_printf(",%s :\x02%s pickup is ready to start!\x02 Players are: ",
 		   botChannel, pickup->name);
-	printPlayers(pickup->playerList, ", ");
+	printPlayers(pickup->playerList, ", ", false);
 	bot_printf("\r\n");
 
 	node = pushPickup(NULL, pickup);
@@ -601,7 +608,7 @@ void announcePlayers(pickupNode_t *node, const char *to)
 					   node->pickup->count);
 			}
 
-			printPlayers(node->pickup->playerList, ", ");
+			printPlayers(node->pickup->playerList, ", ", false);
 			bot_printf("\r\n");
 		}
 		announcePlayers(node->next, to);
@@ -819,10 +826,11 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 
 void numericReplyReply(int num, message_t *message)
 {
+	const char *nick;
+
 	if (!message->parameter[0] || strcmp(message->parameter[0], botNick))
 		return;
 
-	// React to numeric reply
 	switch (num) {
 	case RPL_WELCOME:
 		if (botQpassword) {
@@ -830,6 +838,32 @@ void numericReplyReply(int num, message_t *message)
 				   botNick, botQpassword);
 		}
 		bot_printf("JOIN %s\r\n", botChannel);
+		break;
+	case RPL_NAMREPLY:
+		if (!message->parameter[2] ||
+		    strcmp(message->parameter[2], botChannel))
+			break;
+
+		nick = strtok(message->trailing, " ");
+		while (nick) {
+			player_t *player;
+			bool op = false;
+
+			if (nick[0] == '@') {
+				op = true;
+				nick++;
+			} else if (nick[0] == '+') {
+				nick++;
+			}
+
+			player = findNick(nick);
+			if (player)
+				player->op = op;
+			else
+				registerPlayer(nick, op);
+
+			nick = strtok(NULL, " ");
+		}
 		break;
 	}
 }
@@ -866,6 +900,48 @@ void messageReply(message_t *message)
 	} else if (!strcmp(message->command, "NICK")) {
 		if (message->prefix.nick && message->trailing)
 			changeNick(message->prefix.nick, message->trailing);
+	} else if (!strcmp(message->command, "JOIN")) {
+		if (message->prefix.nick && message->parameter[0] &&
+		    !strcmp(message->parameter[0], botChannel)) {
+			if (findNick(message->prefix.nick))
+				com_warning("JOIN: Player %s was already registered",
+					    message->prefix.nick);
+			else
+				registerPlayer(message->prefix.nick, false);
+		}
+	} else if (!strcmp(message->command, "MODE")) {
+		if (message->parameter[0] && message->parameter[1] &&
+		    !strcmp(message->parameter[0], botChannel)) {
+			player_t *player;
+			const char *nick;
+			bool op = false;
+			int i;
+
+			for (i = 1; message->parameter[1][i]; i++) {
+				if (message->parameter[1][i] == 'o')
+					op = true;
+			}
+			if (!op)
+				return;
+			if (message->parameter[1][0] == '-')
+				op = false;
+			else if (message->parameter[1][0] != '+')
+				return;
+
+			// There is 'o' mode so 'l' and <limit> parameters are not
+			nick = message->parameter[2];
+			if (!nick)
+				return;
+
+			player = findNick(nick);
+			if (player) {
+				player->op = op;
+			} else {
+				player = registerPlayer(nick, op);
+				com_warning("MODE: Player %s was not registered",
+					    nick);
+			}
+		}
 	} else {
 		// Determine numeric reply number
 		int num = 0;
@@ -906,7 +982,7 @@ void printLists()
 	if(bot.playerList) {
 		bot_flush();
 		printf("bot.playerList = ");
-		printPlayers(bot.playerList, "->");
+		printPlayers(bot.playerList, "->", true);
 		*bot.cursor = '\0';
 		puts(bot.sbuf);
 		bot.cursor = bot.sbuf;
