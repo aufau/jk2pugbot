@@ -25,6 +25,7 @@ const char * const	botVersion	= "beta";
 const char * const	botHost		= "irc.quakenet.org";
 const char * const	botPort		= "6667";
 const char * const	botNick		= "JK2PUGBOT";
+const char * const	botRealName	= "";
 const char * const	botChannel	= "#jk2pugbot";
 const char * const	botTopic	= "Welcome to #jk2pugbot";
 const char * const	botQpassword	= NULL;	// Password to auth with Q or NULL
@@ -939,8 +940,8 @@ connect:
 		goto connect;
 	}
 #endif // !DEBUG_INTERCEPT
-	bot_printf("USER %s 0 0 :%s\r\n", botNick, botNick);
 	bot_printf("NICK %s\r\n", botNick);
+	bot_printf("USER %s 0 * :%s\r\n", botNick, botRealName);
 
 	msgLen = 0;
 	while (true) {
