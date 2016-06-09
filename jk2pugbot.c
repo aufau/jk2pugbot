@@ -31,6 +31,7 @@ const char * const	botTopic	= "Welcome to #jk2pugbot";
 const char * const	botQpassword	= NULL;	// Password to auth with Q or NULL
 const int	botTimeout	= 300;		// Try to reconnect after this number of seconds
 const bool	botSilentWho	= true;		// Don't announce players in the main channel
+const bool	botPrintEmpty	= false;	// Print empty pickups in channel topic
 const bool	botStrict1459	= false;	// If your server runs in strict RFC 1459 mode
 
 pickup_t pickupsArray[] = {
@@ -636,18 +637,20 @@ void printPickups(pickupNode_t *node)
 	if (node) {
 		const char *formatString;
 
-		if (node->pickup->max) {
-			formatString = node->pickup->count ?
-				"\x02(\x02 %s %d/%d \x02)\x02" :
-				"( %s %d/%d )";
-			bot_printf(formatString, node->pickup->name,
-				   node->pickup->count, node->pickup->max);
-		} else {
-			formatString = node->pickup->count ?
-				"\x02(\x02 %s %d \x02)\x02" :
-				"( %s %d )";
-			bot_printf(formatString, node->pickup->name,
-				   node->pickup->count);
+		if (botPrintEmpty || node->pickup->count) {
+			if (node->pickup->max) {
+				formatString = node->pickup->count ?
+					"\x02(\x02 %s %d/%d \x02)\x02" :
+					"( %s %d/%d )";
+				bot_printf(formatString, node->pickup->name,
+					   node->pickup->count, node->pickup->max);
+			} else {
+				formatString = node->pickup->count ?
+					"\x02(\x02 %s %d \x02)\x02" :
+					"( %s %d )";
+				bot_printf(formatString, node->pickup->name,
+					   node->pickup->count);
+			}
 		}
 		printPickups(node->next);
 	}
@@ -692,7 +695,7 @@ void updateStatus()
 {
 	bot_printf("TOPIC %s :", botChannel);
 	printPickups(bot.pickupList);
-	bot_printf("\x02(\x02 %s \x02)(\x02 Type !help for more info \x02)\x02\r\n", bot.topic);
+	bot_printf("\x02(\x02 %s \x02)(\x02 Type !help \x02)\x02\r\n", bot.topic);
 	bot.statusChanged = false;
 }
 
