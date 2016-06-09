@@ -79,12 +79,12 @@ typedef struct server_s {
 	const char *name;
 	const char *address;
 	const char *port;
-	char *games;
+	const char *games;
 	enum sv_type type;
 } server_t;
 
 typedef struct serverNode_s {
-	server_t *server;
+	const server_t *server;
 	struct serverNode_s *next;
 } serverNode_t;
 
@@ -92,7 +92,6 @@ typedef struct pickup_s {
 	const char *name;
 	serverNode_t *serverList;
 	playerNode_t *playerList;
-	int serverCount;
 	int count;
 	int max;
 } pickup_t;
@@ -101,8 +100,6 @@ typedef struct pickupNode_s {
 	pickup_t *pickup;
 	struct pickupNode_s *next;
 } pickupNode_t;
-
-void announcePickup(pickup_t *pickup);
 
 typedef enum {
 	RPL_WELCOME		= 001,

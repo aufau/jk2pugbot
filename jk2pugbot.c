@@ -44,7 +44,7 @@ pickup_t pickupsArray[] = {
 
 // These servers will be recommended when announcing a pickup game.
 // If your game doesn't use quake 3 engine then don't set the .type variable.
-server_t serversArray[] = {
+const server_t serversArray[] = {
 	{ .name = "zedi", .address = "185.44.107.108", .port = "28051", .games = "2v2 4v4", .type = SV_Q3 },
 	{ .name = "FC League", .address = "force-crusaders.org", .port = "28071", .games = "2v2 4v4", .type = SV_Q3 },
 	{ .name = "[united] Coruscant", .address = "185.44.107.108", .port = "28070", .games = "CTF", .type = SV_Q3 },
@@ -66,6 +66,8 @@ struct {
 	playerNode_t *playerList;
 	player_t *self;
 } bot;
+
+void announcePickup(pickup_t *pickup);
 
 void __attribute__ ((noreturn)) com_error(const char *format, ...)
 {
@@ -317,7 +319,7 @@ void sigHandler(int signum)
 	exit(EXIT_SUCCESS);
 }
 
-int getQ3ServerInfo(server_t *server, q3serverInfo_t *info)
+int getQ3ServerInfo(const server_t *server, q3serverInfo_t *info)
 {
 	char svbuf[MAX_Q3_INFO_LEN + 1];
 	struct addrinfo hints;
@@ -449,7 +451,7 @@ playerNode_t *pushPlayer(playerNode_t *node, player_t *player)
 	return playerNode;
 }
 
-serverNode_t *pushServer(serverNode_t *node, server_t *server)
+serverNode_t *pushServer(serverNode_t *node, const server_t *server)
 {
 	serverNode_t *serverNode = com_malloc(sizeof(serverNode_t));
 	serverNode->server = server;
@@ -457,7 +459,7 @@ serverNode_t *pushServer(serverNode_t *node, server_t *server)
 	return serverNode;
 }
 
-void addServer(pickupNode_t *node, server_t *server)
+void addServer(pickupNode_t *node, const server_t *server)
 {
 	if (node) {
 		node->pickup->serverList = pushServer(node->pickup->serverList, server);
@@ -469,7 +471,7 @@ void addServer(pickupNode_t *node, server_t *server)
  * move player to the top of a list or return null
  */
 
-playerNode_t *cutPlayerH(playerNode_t *node, player_t *player)
+playerNode_t *cutPlayerH(playerNode_t *node, const player_t *player)
 {
 	if (!node->next) {
 		return NULL;
@@ -484,7 +486,7 @@ playerNode_t *cutPlayerH(playerNode_t *node, player_t *player)
 	}
 }
 
-playerNode_t *cutPlayer(playerNode_t *node, player_t *player)
+playerNode_t *cutPlayer(playerNode_t *node, const player_t *player)
 {
 	if (node) {
 		if (node->player == player)
@@ -515,7 +517,7 @@ player_t *findNick(const char *nick)
 	return findNickH(bot.playerList, nick);
 }
 
-int countPlayers(playerNode_t *node)
+int countPlayers(const playerNode_t *node)
 {
 	if (!node)
 		return 0;
@@ -523,7 +525,7 @@ int countPlayers(playerNode_t *node)
 		return countPlayers(node->next) + 1;
 }
 
-void removePlayer(pickupNode_t *node, player_t *player)
+void removePlayer(pickupNode_t *node, const player_t *player)
 {
 	if (node) {
 		playerNode_t *playerNode = cutPlayer(node->pickup->playerList, player);
@@ -536,7 +538,7 @@ void removePlayer(pickupNode_t *node, player_t *player)
 	}
 }
 
-void removePlayers(pickupNode_t *pickupNode, playerNode_t *node)
+void removePlayers(pickupNode_t *pickupNode, const playerNode_t *node)
 {
 	if (node) {
 		removePlayer(pickupNode, node->player);
@@ -618,7 +620,7 @@ void changeNick(const char *nick, const char *newnick)
 	}
 }
 
-void printPlayers(playerNode_t *node, const char *sep, bool op)
+void printPlayers(const playerNode_t *node, const char *sep, bool op)
 {
 	if (node) {
 		const char *opMark = "";
@@ -632,7 +634,7 @@ void printPlayers(playerNode_t *node, const char *sep, bool op)
 	}
 }
 
-void printPickups(pickupNode_t *node)
+void printPickups(const pickupNode_t *node)
 {
 	if (node) {
 		const char *formatString;
@@ -656,7 +658,7 @@ void printPickups(pickupNode_t *node)
 	}
 }
 
-void printServers(serverNode_t *node)
+void printServers(const serverNode_t *node)
 {
 	q3serverInfo_t q3serverInfo;
 
@@ -699,7 +701,7 @@ void updateStatus()
 	bot.statusChanged = false;
 }
 
-void announceServers(pickupNode_t *node, const char *to)
+void announceServers(const pickupNode_t *node, const char *to)
 {
 	if (node) {
 		if (node->pickup->serverList) {
@@ -729,7 +731,7 @@ void announcePickup(pickup_t *pickup)
 	popPickup(node);
 }
 
-void announcePlayers(pickupNode_t *node, const char *to)
+void announcePlayers(const pickupNode_t *node, const char *to)
 {
 	if (node) {
 		if (node->pickup->count) {
@@ -750,7 +752,7 @@ void announcePlayers(pickupNode_t *node, const char *to)
 	}
 }
 
-void promotePickup(pickupNode_t *node)
+void promotePickup(const pickupNode_t *node)
 {
 	const char *pluralSuffix;
 	const char *pluralSuffixLeft;
@@ -820,7 +822,7 @@ void printVersion(const char *to)
 	bot_printf("PRIVMSG %s :Visit https://github.com/aufau/jk2pugbot for more\r\n", to);
 }
 
-void printGamesH(pickupNode_t *node)
+void printGamesH(const pickupNode_t *node)
 {
 	if (node) {
 		bot_printf(" %s", node->pickup->name);
@@ -839,7 +841,7 @@ void printGames(const char *msg)
  * functions
  */
 
-pickup_t *findPickup(pickupNode_t *node, const char *list)
+pickup_t *findPickup(const pickupNode_t *node, const char *list)
 {
 	if (!node)
 		return NULL;
