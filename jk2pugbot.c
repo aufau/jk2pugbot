@@ -35,20 +35,19 @@ const bool	botPrintEmpty	= false;	// Print empty pickups in channel topic
 const bool	botStrict1459	= false;	// If your server runs in strict RFC 1459 mode
 
 pickup_t pickupsArray[] = {
-	{ .name = "MB", .max = 6 },
-	{ .name = "CTF", .max = 6 },
+	{ .name = "CTF", .max = 16 },
 	{ .name = "4v4", .max = 8 },
 	{ .name = "2v2", .max = 4 },
-	{ .name = "duel", .max = 0 },
+	{ .name = "duel", .max = 2 },
+	{ .name = "ffa", .max = 0 },
 };
 
 // These servers will be recommended when announcing a pickup game.
 // If your game doesn't use quake 3 engine then don't set the .type variable.
 const server_t serversArray[] = {
-	{ .name = "zedi", .address = "185.44.107.108", .port = "28051", .games = "2v2 4v4", .type = SV_Q3 },
-	{ .name = "FC League", .address = "force-crusaders.org", .port = "28071", .games = "2v2 4v4", .type = SV_Q3 },
 	{ .name = "[united] Coruscant", .address = "185.44.107.108", .port = "28070", .games = "CTF", .type = SV_Q3 },
 	{ .name = "jk2.ouned.de", .address = "185.44.107.108", .port = "28071", .games = "CTF", .type = SV_Q3 },
+	{ .name = "SoL", .address = "31.186.250.121", .port = "28070", .games = "ffa duel", .type = SV_Q3 },
 };
 
 /*
