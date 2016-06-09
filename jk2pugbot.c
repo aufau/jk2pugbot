@@ -31,6 +31,7 @@ const char * const	botTopic	= "Welcome to #jk2pugbot";
 const char * const	botQpassword	= NULL;	// Password to auth with Q or NULL
 const int	botTimeout	= 300;		// Try to reconnect after this number of seconds
 const bool	botSilentWho	= true;		// Don't announce players in the main channel
+const bool	botStrict1459	= false;	// If your server runs in strict RFC 1459 mode
 
 pickup_t pickupsArray[] = {
 	{ .name = "MB", .max = 6 },
@@ -142,6 +143,36 @@ int irc_isspecial(int c)
 	// "[", "]", "\", "`", "_", "^", "{", "|", "}"
 	return ((c >= 0x5b && c <= 0x60) ||
 		(c >= 0x7b && c <= 0x7d));
+}
+
+int irc_tolower(int c)
+{
+	if (irc_isupper(c))
+		return c + 'a' - 'A';
+	if (botStrict1459) {
+		if (c >= '[' && c <= '\\')
+			return c + '{' - '[';
+	} else {
+		if (c >= '[' && c <= '^')
+			return c + '{' - '[';
+	}
+
+	return c;
+}
+
+int irc_strcasecmp(const char *s1, const char *s2)
+{
+	int diff;
+
+	while (*s1) {
+		diff = irc_tolower(*s1) - irc_tolower(*s2);
+		if (diff)
+			return diff;
+		s1++;
+		s2++;
+	}
+
+	return *s2;
 }
 
 bool irc_validateNick(const char *nick)
@@ -902,7 +933,7 @@ void numericReplyReply(int num, message_t *message)
 		break;
 	case RPL_NAMREPLY:
 		if (!message->parameter[2] ||
-		    strcmp(message->parameter[2], botChannel))
+		    irc_strcasecmp(message->parameter[2], botChannel))
 			break;
 
 		nick = strtok(message->trailing, " ");
@@ -956,14 +987,14 @@ void messageReply(message_t *message)
 			forgetNick(message->prefix.nick);
 	} else if (!strcmp(message->command, "KICK")) {
 		if (message->parameter[0] && message->parameter[1] &&
-		    !strcmp(message->parameter[0], botChannel))
+		    !irc_strcasecmp(message->parameter[0], botChannel))
 			forgetNick(message->parameter[1]);
 	} else if (!strcmp(message->command, "NICK")) {
 		if (message->prefix.nick && message->trailing)
 			changeNick(message->prefix.nick, message->trailing);
 	} else if (!strcmp(message->command, "JOIN")) {
 		if (message->prefix.nick && message->parameter[0] &&
-		    !strcmp(message->parameter[0], botChannel)) {
+		    !irc_strcasecmp(message->parameter[0], botChannel)) {
 			if (findNick(message->prefix.nick))
 				com_warning("JOIN: Player %s was already registered",
 					    message->prefix.nick);
@@ -972,7 +1003,7 @@ void messageReply(message_t *message)
 		}
 	} else if (!strcmp(message->command, "MODE")) {
 		if (message->parameter[0] && message->parameter[1] &&
-		    !strcmp(message->parameter[0], botChannel)) {
+		    !irc_strcasecmp(message->parameter[0], botChannel)) {
 			player_t *player;
 			const char *nick;
 			bool op = false;
