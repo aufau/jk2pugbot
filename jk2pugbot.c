@@ -80,6 +80,14 @@ void __attribute__ ((noreturn)) com_error(const char *format, ...)
 	exit(EXIT_FAILURE);
 }
 
+void __attribute__ ((noreturn)) com_perror(const char *s)
+{
+	perror(s);
+	assert(0);
+	close(bot.conn);
+	exit(EXIT_FAILURE);
+}
+
 void com_warning(const char *format, ...)
 {
 	va_list ap;
@@ -94,8 +102,24 @@ void *com_malloc(size_t size)
 {
 	void *retval = malloc(size);
 	if (!retval)
-		com_error("malloc: Failed to allocate %zd bytes", size);
+		com_perror("malloc");
 	return retval;
+}
+
+char *com_strdup(const char *s)
+{
+	char *dup;
+#if _POSIX_C_SOURCE >= 200809L
+	dup = strdup(s);
+	if (!dup)
+		com_perror("com_strdup");
+#else
+	int len = strlen(s) + 1;
+
+	dup = com_malloc(len);
+	memcpy(dup, s, len);
+#endif
+	return dup;
 }
 
 ssize_t com_write(int fildes, const void *buf, size_t nbyte)
@@ -655,16 +679,13 @@ void printServers(serverNode_t *node)
 
 void setTopic(const char *newTopic)
 {
-	int len;
-
 	if (!newTopic)
 		return;
 
 	if (bot.topic)
 		free(bot.topic);
-	len = strlen(newTopic) + 1;
-	bot.topic = com_malloc(len);
-	memcpy(bot.topic, newTopic, len);
+
+	bot.topic = com_strdup(newTopic);
 }
 
 void updateStatus()
@@ -1082,8 +1103,7 @@ void initPickups()
 		bot.pickupList = pushPickup(bot.pickupList, &pickupsArray[i]);
 
 	for (i = 0; i < sizeof(serversArray) / sizeof(*serversArray); i++) {
-		games = strdup(serversArray[i].games);
-		assert(games);
+		games = com_strdup(serversArray[i].games);
 		pickupList = parsePickupList(strtok(games, " "));
 		addServer(pickupList, &serversArray[i]);
 		free(games);
