@@ -132,7 +132,7 @@ ssize_t com_write(int fildes, const void *buf, size_t nbyte)
 		written += len;
 
 		if (len == -1) {
-			perror("com_write: ");
+			perror("com_write");
 			break;
 		}
 		if (len == 0)
@@ -1174,13 +1174,13 @@ connect:
 	}
 	bot.conn = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 	if (bot.conn == -1) {
-		perror("socket: ");
+		perror("socket");
 		sleep(botTimeout);
 		goto connect;
 	}
 	retVal = connect(bot.conn, res->ai_addr, res->ai_addrlen);
 	if (retVal == -1) {
-		perror("connect: ");
+		perror("connect");
 		sleep(botTimeout);
 		goto connect;
 	}
@@ -1197,7 +1197,7 @@ connect:
 		timeout.tv_usec = 0;
 		retVal = select(bot.conn + 1, &set, NULL, NULL, &timeout);
 		if (retVal == -1) {
-			perror("select: ");
+			perror("select");
 			sleep(botTimeout);
 			goto connect;
 		} else if (retVal == 0) {
@@ -1209,7 +1209,7 @@ connect:
 		assert(sizeof(buf) - msgLen - 1 > 0);
 		retVal = read(bot.conn, &buf[msgLen], sizeof(buf) - msgLen - 1);
 		if (retVal == -1) {
-			perror("read: ");
+			perror("read");
 			goto connect;
 		} else if (retVal == 0) { // FIN
 			com_warning("Connection closed. Reconnecting...");
