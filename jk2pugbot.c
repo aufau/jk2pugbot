@@ -214,7 +214,7 @@ bool irc_validateNick(const char *nick)
 	if (!irc_isalpha(nick[0]) && !irc_isspecial(nick[0]))
 		return false;
 
-	for (i = 1; i <= 9; i++) {
+	for (i = 1; i <= 9 || !botStrict1459; i++) {
 		int ch = nick[i];
 
 		if (!ch)
