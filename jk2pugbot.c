@@ -537,11 +537,11 @@ void removePlayer(pickupNode_t *node, const player_t *player)
 	}
 }
 
-void removePlayers(pickupNode_t *pickupNode, const playerNode_t *node)
+void removePickupPlayers(pickup_t *pickup)
 {
-	if (node) {
-		removePlayer(pickupNode, node->player);
-		removePlayers(pickupNode, node->next);
+	if (pickup->playerList) {
+		removePlayer(bot.pickupList, pickup->playerList->player);
+		removePickupPlayers(pickup);
 	}
 }
 
@@ -589,8 +589,7 @@ void addPlayer(pickupNode_t *node, player_t *player)
 			bot.statusChanged = true;
 			if (node->pickup->max && node->pickup->count == node->pickup->max) {
 				announcePickup(node->pickup);
-				removePlayers(bot.pickupList,
-					      node->pickup->playerList);
+				removePickupPlayers(node->pickup);
 				return;
 			}
 		}
