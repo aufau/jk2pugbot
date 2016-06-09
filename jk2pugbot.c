@@ -58,10 +58,12 @@ struct {
 	int conn;			// irc server socket file descriptor
 	char sbuf[SEND_BUF_SIZE + 1];	// send buffer; +1 for closing \0 when printing
 	char *cursor;
+	char *topic;
 	bool statusChanged;
 
 	pickupNode_t *pickupList;
 	playerNode_t *playerList;
+	player_t *self;
 } bot;
 
 void __attribute__ ((noreturn)) com_error(const char *format, ...)
@@ -407,6 +409,10 @@ player_t *registerPlayer(const char *nick, bool op)
 	playerNode->player = player;
 	playerNode->next = bot.playerList;
 	bot.playerList = playerNode;
+
+	if (!bot.self && !strcmp(nick, botNick))
+		bot.self = player;
+
 	return player;
 }
 
@@ -647,12 +653,25 @@ void printServers(serverNode_t *node)
 	}
 }
 
+void setTopic(const char *newTopic)
+{
+	int len;
+
+	if (!newTopic)
+		return;
+
+	if (bot.topic)
+		free(bot.topic);
+	len = strlen(newTopic) + 1;
+	bot.topic = com_malloc(len);
+	memcpy(bot.topic, newTopic, len);
+}
 
 void updateStatus()
 {
 	bot_printf("TOPIC %s :", botChannel);
 	printPickups(bot.pickupList);
-	bot_printf("\x02(\x02 %s \x02)(\x02 Type !help for more info \x02)\x02\r\n", botTopic);
+	bot_printf("\x02(\x02 %s \x02)(\x02 Type !help for more info \x02)\x02\r\n", bot.topic);
 	bot.statusChanged = false;
 }
 
@@ -1033,6 +1052,9 @@ void messageReply(message_t *message)
 				com_warning("MODE: Player %s was not registered",
 					    nick);
 			}
+
+			if (op && player == bot.self)
+				bot.statusChanged = true;
 		}
 	} else {
 		// Determine numeric reply number
@@ -1109,6 +1131,7 @@ int main()
 	sigaction(SIGINT, &act, NULL);
 
 	initPickups();
+	setTopic(botTopic);
 	assert(irc_validateNick(botNick));
 connect:
 	bot.cursor = bot.sbuf;
