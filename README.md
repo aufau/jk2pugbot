@@ -16,6 +16,7 @@ Features
 * !add !remove !who !promote !servers commands accept multiple arguments.
 * Track nick changes and autoremove on PART and QUIT.
 * Auth with Q.
+* Chanop command: !topic
 
 Configuration
 -------------

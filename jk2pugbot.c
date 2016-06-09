@@ -400,12 +400,12 @@ pickupNode_t *popPickup(pickupNode_t *node)
 	return NULL;
 }
 
-pickupNode_t *cleanPickupList(pickupNode_t *node)
+pickupNode_t *freePickupList(pickupNode_t *node)
 {
 	if (!node)
 		return NULL;
 	else
-		return cleanPickupList(popPickup(node));
+		return freePickupList(popPickup(node));
 }
 
 playerNode_t *popPlayer(playerNode_t *node)
@@ -799,6 +799,16 @@ void printHelp(const char *to)
 	bot_printf("PRIVMSG %s :!who - List players added to pickups\r\n", to);
 	bot_printf("PRIVMSG %s :!promote - Promote a pickup game\r\n", to);
 	bot_printf("PRIVMSG %s :!servers - List recommended servers\r\n", to);
+
+	if (!irc_validateNick(to))
+		return;
+
+	player_t *player = findNick(to);
+
+	if (!player || !player->op)
+		return;
+
+	bot_printf("PRIVMSG %s :!topic - Set channel topic\r\n");
 }
 
 void printVersion(const char *to)
@@ -826,28 +836,30 @@ void printGames(const char *msg)
  * functions
  */
 
-pickup_t *parsePickupListH(pickupNode_t *node, const char *list)
+pickup_t *findPickup(pickupNode_t *node, const char *list)
 {
 	if (!node)
 		return NULL;
 	if (!strcasecmp(list, node->pickup->name))
 		return node->pickup;
 	else
-		return parsePickupListH(node->next, list);
+		return findPickup(node->next, list);
 }
 
-pickupNode_t *parsePickupList(const char *list)
+pickupNode_t *parsePickupList(char *list)
 {
-	if (!list) {
+	char *item;
+	pickup_t *pickup;
+
+	item = strtok(list, " ");
+	if (!item)
 		return NULL;
-	} else {
-		pickup_t *pickup = parsePickupListH(bot.pickupList, list);
-		list = strtok(NULL, " ");
-		if (pickup)
-			return pushPickup(parsePickupList(list), pickup);
-		else
-			return parsePickupList(list);
-	}
+	pickup = findPickup(bot.pickupList, item);
+
+	if (pickup)
+		return pushPickup(parsePickupList(NULL), pickup);
+	else
+		return parsePickupList(NULL);
 }
 
 // Parses IRC message string with \r\n removed. Returns true on sucess
@@ -906,41 +918,55 @@ bool parseMessage(char *ptr, char *msgEnd, message_t *message)
 
 void privmsgReply(char *cmd, const char *replyTo, const char *from)
 {
-	pickupNode_t *pickupList;
+	pickupNode_t *pickupList = NULL;
 	char *args;
 
-	strtok(cmd, " ");
-	args = strtok(NULL, " ");
-	pickupList = parsePickupList(args);
+	args = strchr(cmd, ' ');
+	if (args)
+		*args++ = '\0';
 
 	if (!strcmp(cmd, "add")) {
+		if (args)
+			pickupList = parsePickupList(args);
 		if (pickupList)
 			addNick(pickupList, from);
 		else
 			printGames("Type !add <game> to sign up.");
 	} else if (!strcmp(cmd, "remove")) {
-		if (!args)
+		if (args) {
+			pickupList = parsePickupList(args);
+
+			if (pickupList)
+				removeNick(pickupList, from);
+			else
+				printGames("Type !remove <game> to sign off.");
+		} else {
 			removeNick(bot.pickupList, from);
-		else if(pickupList)
-			removeNick(pickupList, from);
-		else
-			printGames("Type !remove <game> to sign off.");
+		}
 	} else if (!strcmp(cmd, "who")) {
 		if (botSilentWho)
 			replyTo = from;
 
-		if (!args)
+		if (args) {
+			pickupList = parsePickupList(args);
+
+			if (pickupList)
+				announcePlayers(pickupList, replyTo);
+			else
+				printGames("Type !who <game> to see players who signed up already.");
+		} else {
 			announcePlayers(bot.pickupList, replyTo);
-		else if(pickupList)
-			announcePlayers(pickupList, replyTo);
-		else
-			printGames("Type !who <game> to see players who signed up already.");
+		}
 	} else if (!strcmp(cmd, "servers")) {
+		if (args)
+			pickupList = parsePickupList(args);
 		if (pickupList)
 			announceServers(pickupList, replyTo);
 		else
 			printGames("Type !servers <game> to see recommended servers.");
 	}else if (!strcmp(cmd, "promote")) {
+		if (args)
+			pickupList = parsePickupList(args);
 		if (pickupList)
 			promotePickup(pickupList);
 		else
@@ -951,9 +977,16 @@ void privmsgReply(char *cmd, const char *replyTo, const char *from)
 		printVersion(replyTo);
 	} else if (!strcmp(cmd, "ping")) {
 		bot_printf("PRIVMSG %s :!pong\r\n", replyTo);
+	} else if (!strcmp(cmd, "topic")) {
+		player_t *player = findNick(from);
+
+		if (args && player && player->op) {
+			setTopic(args);
+			bot.statusChanged = true;
+		}
 	}
 
-	cleanPickupList(pickupList);
+	freePickupList(pickupList);
 }
 
 void numericReplyReply(int num, message_t *message)
@@ -1104,8 +1137,9 @@ void initPickups()
 
 	for (i = 0; i < sizeof(serversArray) / sizeof(*serversArray); i++) {
 		games = com_strdup(serversArray[i].games);
-		pickupList = parsePickupList(strtok(games, " "));
+		pickupList = parsePickupList(games);
 		addServer(pickupList, &serversArray[i]);
+		freePickupList(pickupList);
 		free(games);
 	}
 }
